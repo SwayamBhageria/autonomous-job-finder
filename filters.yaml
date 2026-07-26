@@ -1,0 +1,131 @@
+# ─────────────────────────────────────────────────────────────
+#  Targeting — full-stack + AI/ML roles, India. Tune to taste.
+#  Everything here is tunable. Re-run and it takes effect next poll.
+# ─────────────────────────────────────────────────────────────
+
+# A role must match at least ONE of these in its title (case-insensitive).
+title_include:
+  - engineer
+  - developer
+  - full ?stack
+  - front ?end
+  - back ?end
+  - software
+  - \bsde\b
+  - \bml\b
+  - \bai\b
+  - applied scientist
+  - data scientist
+  - member of technical staff
+  - programmer
+  - platform
+  # Adobe (and a few others) title their SDE roles "Computer Scientist I/II" —
+  # ~12 India roles were being missed outright by the include list.
+  - computer scientist
+
+# If the title matches any of these, it's dropped (too senior / not eng / intern).
+title_exclude:
+  - intern
+  - internship
+  - principal
+  - \bstaff\b
+  - director
+  - \bvp\b
+  - vice president
+  - head of
+  - distinguished
+  - fellow
+  - \bmanager\b
+  - architect
+  - president
+  - \blead\b            # comment out if you want tech-lead roles too
+  - sales
+  - account executive
+  - recruit
+  - marketing
+  - designer
+  - support
+  # ── not your target (SRE/DevOps/security/QA/hardware). Re-enable any by commenting out. ──
+  - site reliability
+  - \bsre\b
+  - devops
+  - \bnetwork\b
+  - infosec
+  - security engineer
+  - service delivery
+  - delivery engineer
+  - \bsdet\b
+  - in test
+  - \bqa\b
+  # "Software Development Engineer Testing" and "Quality Analyst" both reached
+  # B-tier on the Jul-23 dry run — \bsdet\b and "in test" don't catch either.
+  - engineer.{0,4}testing
+  - \btest(ing)? engineer\b
+  - quality analyst
+  - embedded
+  - firmware
+  - hardware
+  - solution engineer
+  - solutions engineer
+  - sales engineer
+  - customer engineer
+  - backline
+  - pre.?sales
+
+# Location must match one of these (India cities + India-remote).
+location_include:
+  - \bindia\b
+  - bangalore
+  - bengaluru
+  - gurgaon
+  - gurugram
+  - hyderabad
+  - \bdelhi\b
+  - noida
+  - mumbai
+  - \bpune\b
+  - chennai
+  - kolkata
+
+# Also match "Remote - India" style strings even if a city isn't named.
+remote_india: true
+# Match a bare "Remote" with no country? (noisy — usually US-remote). Default off.
+include_generic_remote: false
+
+# How long to remember a job id before forgetting it (keeps state file small).
+forget_after_days: 90
+
+# ── Quality gate (fit scoring) ───────────────────────────────
+# HARD DROP: if the JD states a required experience of this many years or
+# more, skip it entirely (before any scoring). 4 keeps "3+ yrs" JDs in play
+# (Indian postings often say 3+ but hire at ~1-2 yrs; Gemini still judges
+# seniority) while dropping clearly-senior 4+/5+ roles. Set 0 to disable.
+hard_drop_years: 4
+
+# Stage 1 heuristic: roles below this are dropped before hitting Gemini.
+# 40 → 35 with the B-tier: the heuristic is a crude keyword count and was
+# vetoing roles before the (much better) Gemini judge ever saw them. Gemini
+# free-tier quota is nowhere near binding, so let it make more of the calls.
+heuristic_floor: 35
+# ── Two-tier output (Jul-2026) ───────────────────────────────
+# A single bar was the volume bottleneck: everything below it was discarded
+# forever, and at 70 that was ~92% of new roles — ~7 alerts/day. But the data
+# says cold applies convert at 2-3% while referral-backed ones convert at
+# 40-65%, so the answer is not "lower the bar", it's "two different bars for
+# two different amounts of effort":
+#
+#   A-tier (≥ notify_threshold) → full alert + referral outreach + tailored
+#       apply. Expensive per role, high conversion. Keep this bar HIGH.
+#   B-tier (bulk_threshold … notify_threshold) → compact bulk-apply list, no
+#       outreach drafts, autofill-and-submit. Cheap per role, lottery odds.
+#       This is the tier that was being thrown away.
+notify_threshold: 72
+bulk_threshold: 48
+# Never send more than this many A-tier roles in one run (ranked best-first).
+max_per_run: 20
+# ...and up to this many B-tier roles, as a compact list.
+max_bulk_per_run: 40
+# Max roles from a single company per batch, so one company can't flood you.
+max_per_company: 3
+# B-tier is a volume channel, so one company may contribute more there.
+max_bulk_per_company: 8

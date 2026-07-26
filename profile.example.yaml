@@ -1,0 +1,60 @@
+# ─────────────────────────────────────────────────────────────
+#  Copy to profile.yaml and fill in with your own details.
+#  profile.yaml is gitignored — it holds your identity, your CV,
+#  and your salary floor, so it must never be committed.
+# ─────────────────────────────────────────────────────────────
+
+# Your identity — used to build referral/alumni search links and to
+# sign outreach drafts.
+me:
+  name: Your Name
+  email: you@example.com
+  linkedin: https://www.linkedin.com/in/your-handle
+  school: YOURUNI                  # short form, matched in alumni search
+  school_full: Your University Name
+  company: Your Current Employer   # ex-colleagues who moved = warm referral
+
+# Free-text CV summary. This is what the Gemini fit-gate reasons over,
+# so be specific and honest — it sets the quality of every score.
+candidate: |
+  Your Name — Software Engineer, ~N years experience (degree, school, year).
+  Describe your current role, the stack you actually ship in, and the scale
+  or impact where you have real numbers.
+
+  Side projects worth naming, each with a concrete metric.
+
+  Stack: languages · frameworks · datastores · infra.
+
+strong_stack:     # JD mentions of these = good fit
+  - typescript
+  - javascript
+  - react
+  - node
+  - python
+  - fastapi
+  - postgres
+  - full ?stack
+  - llm
+  - \bai\b
+
+weak_stack:       # JD dominated by these = poor fit (penalised hard)
+  - \brust\b
+  - \bc\+\+\b
+  - \bc#\b
+  - \.net\b
+  - salesforce
+  - \bsap\b
+
+preferences:
+  target_roles: "Full-stack, frontend, backend, or AI/ML engineer (SWE/SDE)."
+  seniority: "Entry to mid (0-3 yrs). Avoid Senior/Staff/Lead/Principal/Manager."
+  max_years_required: 3          # heuristic: drop if the JD demands more
+  location: "Your city / country, or remote."
+  min_ctc_lpa: 0                 # your salary floor — keep this private
+  bonus: "Any sector you'd especially like (e.g. fintech) is a plus."
+  two_resumes: "A software resume and an AI resume both exist — each alert says which to send."
+
+# Companies where you have a contact who could refer you → flagged & boosted.
+referral_companies:
+  - Example Corp
+  - Another Company

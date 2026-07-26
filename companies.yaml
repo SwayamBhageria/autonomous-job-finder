@@ -1,0 +1,270 @@
+# ─────────────────────────────────────────────────────────────
+#  Watchlist — companies whose OWN career page we poll directly.
+#  Each was verified live to expose a free ATS JSON board with
+#  India roles (counts = India roles at time of setup, Jul 2026).
+#
+#  ats:    greenhouse | lever | ashby
+#  token:  the board slug used in the ATS API
+#  To add a company: find its careers page, note which ATS it uses,
+#  drop in the slug, done. To pause one: comment it out.
+# ─────────────────────────────────────────────────────────────
+
+companies:
+  # ── Fintech / payments (finance = bonus per your goal) ───────
+  - {name: Affirm,        ats: greenhouse, token: affirm}        # ~175 India
+  - {name: Stripe,        ats: greenhouse, token: stripe}        # ~128 India
+  - {name: Coinbase,      ats: greenhouse, token: coinbase}      # ~118 India
+  - {name: PhonePe,       ats: greenhouse, token: phonepe}       # ~50 India
+  - {name: Adyen,         ats: greenhouse, token: adyen}
+  - {name: Chime,         ats: greenhouse, token: chime}
+  - {name: slice,         ats: greenhouse, token: slice}
+  - {name: Zeta,          ats: lever,      token: zeta}
+  - {name: CRED,          ats: lever,      token: cred}
+  - {name: Fi Money,      ats: lever,      token: fi}
+  - {name: Groww,         ats: greenhouse, token: groww}
+  - {name: Plaid,         ats: ashby,      token: plaid}
+
+  # ── AI-first labs / infra ────────────────────────────────────
+  - {name: Sarvam AI,     ats: ashby,      token: sarvam}        # ~61 India (Indian AI)
+  - {name: Anthropic,     ats: greenhouse, token: anthropic}
+  - {name: OpenAI,        ats: ashby,      token: openai}
+  - {name: Databricks,    ats: greenhouse, token: databricks}    # ~130 India
+  - {name: Together AI,   ats: greenhouse, token: togetherai}
+  - {name: LangChain,     ats: ashby,      token: langchain}
+  - {name: ElevenLabs,    ats: ashby,      token: elevenlabs}
+  - {name: Scale AI,      ats: greenhouse, token: scaleai}
+
+  # ── Developer tools / infra / SaaS (heavy India hiring) ──────
+  - {name: Zscaler,       ats: greenhouse, token: zscaler}       # ~217 India
+  - {name: Twilio,        ats: greenhouse, token: twilio}        # ~151 India
+  - {name: GitLab,        ats: greenhouse, token: gitlab}        # ~142 India
+  - {name: Okta,          ats: greenhouse, token: okta}          # ~106 India
+  - {name: Snowflake,     ats: ashby,      token: snowflake}     # ~85 India
+  - {name: Datadog,       ats: greenhouse, token: datadog}
+  - {name: MongoDB,       ats: greenhouse, token: mongodb}
+  - {name: Confluent,     ats: ashby,      token: confluent}
+  - {name: Elastic,       ats: greenhouse, token: elastic}
+  - {name: Postman,       ats: greenhouse, token: postman}       # India HQ
+  - {name: Vercel,        ats: greenhouse, token: vercel}
+  - {name: Cloudflare,    ats: greenhouse, token: cloudflare}
+  - {name: Airtable,      ats: greenhouse, token: airtable}
+  - {name: Asana,         ats: greenhouse, token: asana}
+  - {name: Notion,        ats: ashby,      token: notion}
+  - {name: Figma,         ats: greenhouse, token: figma}
+  - {name: Miro,          ats: ashby,      token: miro}
+  - {name: Ramp,          ats: ashby,      token: ramp}
+
+  # ── Consumer / marketplace with India eng ────────────────────
+  - {name: Dropbox,       ats: greenhouse, token: dropbox}
+  - {name: Airbnb,        ats: greenhouse, token: airbnb}
+  - {name: Meesho,        ats: lever,      token: meesho}        # ~40 India
+
+  # ── Added Jul 2026 from placement-sheet + list (verified live) ─
+  - {name: PubMatic,      ats: greenhouse, token: pubmatic}      # 25 India, 13 match
+  - {name: Pure Storage,  ats: greenhouse, token: purestorage}   # 68 India, 13 match
+  - {name: Tekion,        ats: greenhouse, token: tekion}        # 39 India, 10 match
+  - {name: Tide,          ats: greenhouse, token: tide}          # 46 India, 6 match (fintech)
+  - {name: Glean,         ats: greenhouse, token: gleanwork}     # 27 India (AI)
+  - {name: Rubrik,        ats: greenhouse, token: rubrik}        # 21 India
+  - {name: InMobi,        ats: greenhouse, token: inmobi}        # 39 India
+  - {name: DevRev,        ats: greenhouse, token: devrev}        # 15 India (AI)
+  - {name: Observe.AI,    ats: greenhouse, token: observeai}     # 6 India (AI)
+  - {name: Agoda,         ats: greenhouse, token: agoda}         # 14 India
+  - {name: Quince,        ats: greenhouse, token: quince}        # 13 India
+  - {name: Blink Health,  ats: greenhouse, token: blinkhealth}   # 9 India
+
+  # ── Quant / trading (top of the placement sheet, finance bonus) ─
+  - {name: Squarepoint,   ats: greenhouse, token: squarepointcapital}  # 26 India, 9 match
+  - {name: Tower Research, ats: greenhouse, token: towerresearchcapital}  # 13 India, 6 match
+  - {name: IMC Trading,   ats: greenhouse, token: imc}           # 12 India
+  - {name: WorldQuant,    ats: greenhouse, token: worldquant}    # 6 India
+
+  # ── Workday boards (finance-heavy + big-tech, India roles) ───
+  #    Verified live; senior-heavy so the fit gate does the trimming.
+  - {name: Citi,            ats: workday, host: citi.wd5.myworkdayjobs.com,        tenant: citi,          site: "2"}
+  - {name: Deutsche Bank,   ats: workday, host: db.wd3.myworkdayjobs.com,          tenant: db,            site: DBWebsite}
+  - {name: Mastercard,      ats: workday, host: mastercard.wd1.myworkdayjobs.com,  tenant: mastercard,    site: CorporateCareers}
+  - {name: Wells Fargo,     ats: workday, host: wf.wd1.myworkdayjobs.com,          tenant: wf,            site: WellsFargoJobs}
+  - {name: Morgan Stanley,  ats: workday, host: ms.wd5.myworkdayjobs.com,          tenant: ms,            site: External}
+  - {name: S&P Global,      ats: workday, host: spgi.wd5.myworkdayjobs.com,        tenant: spgi,          site: SPGI_Careers}
+  - {name: Nasdaq,          ats: workday, host: nasdaq.wd1.myworkdayjobs.com,      tenant: nasdaq,        site: Global_External_Site}
+  - {name: BlackRock,       ats: workday, host: blackrock.wd1.myworkdayjobs.com,   tenant: blackrock,     site: BlackRock_Professional}
+  - {name: Fiserv,          ats: workday, host: fiserv.wd5.myworkdayjobs.com,      tenant: fiserv,        site: EXT}
+  - {name: PayPal,          ats: workday, host: paypal.wd1.myworkdayjobs.com,      tenant: paypal,        site: jobs}
+  - {name: Adobe,           ats: workday, host: adobe.wd5.myworkdayjobs.com,       tenant: adobe,         site: external_experienced}
+  - {name: NVIDIA,          ats: workday, host: nvidia.wd5.myworkdayjobs.com,      tenant: nvidia,        site: NVIDIAExternalCareerSite}
+  - {name: Salesforce,      ats: workday, host: salesforce.wd12.myworkdayjobs.com, tenant: salesforce,    site: External_Career_Site}
+  - {name: Autodesk,        ats: workday, host: autodesk.wd1.myworkdayjobs.com,    tenant: autodesk,      site: Ext}
+  - {name: eBay,            ats: workday, host: ebay.wd5.myworkdayjobs.com,         tenant: ebay,          site: apply}
+  - {name: Workday,         ats: workday, host: workday.wd5.myworkdayjobs.com,     tenant: workday,       site: Workday}
+  - {name: Target,          ats: workday, host: target.wd5.myworkdayjobs.com,      tenant: target,        site: targetcareers}
+  - {name: Cohesity,        ats: workday, host: cohesity.wd5.myworkdayjobs.com,    tenant: cohesity,      site: Cohesity_Careers}
+  - {name: Expedia,         ats: workday, host: expedia.wd108.myworkdayjobs.com,   tenant: expedia,       site: search}
+  - {name: Thomson Reuters, ats: workday, host: thomsonreuters.wd5.myworkdayjobs.com, tenant: thomsonreuters, site: External_Career_Site}
+  # Jul-16 2026 Workday additions (site names found via cxs probing)
+  - {name: State Street,    ats: workday, host: statestreet.wd1.myworkdayjobs.com, tenant: statestreet,   site: Global}       # 20 match, finance
+  - {name: CrowdStrike,     ats: workday, host: crowdstrike.wd5.myworkdayjobs.com, tenant: crowdstrike,   site: crowdstrikecareers}  # 18 match
+  - {name: Gartner,         ats: workday, host: gartner.wd5.myworkdayjobs.com,     tenant: gartner,       site: EXT}          # 7 match, Gurgaon
+  - {name: Cadence,         ats: workday, host: cadence.wd1.myworkdayjobs.com,     tenant: cadence,       site: External_Careers}  # 6 match
+  - {name: Zoom,            ats: workday, host: zoom.wd5.myworkdayjobs.com,        tenant: zoom,          site: zoom}         # 0 now, posts India remote
+  - {name: athenahealth,    ats: workday, host: athenahealth.wd1.myworkdayjobs.com, tenant: athenahealth, site: External}     # Chennai/Pune GCC
+
+  # ── Other free-API ATSes (added Jul 2026) ────────────────────
+  - {name: ServiceNow,      ats: smartrecruiters, token: ServiceNow}   # 395 posts, India roles
+  - {name: NetApp,          ats: eightfold,       token: netapp}       # India-scoped query
+
+  # ── Jul-16 2026 expansion: Indian companies + India-heavy boards ─
+  #    (probed live through the production adapters; counts = matches
+  #     at add time)
+  - {name: Razorpay,      ats: greenhouse, token: razorpaysoftwareprivatelimited}  # 22 jobs (referral list!)
+  - {name: Paytm,         ats: lever,      token: paytm}           # 238 jobs, 3 match
+  - {name: Freshworks,    ats: smartrecruiters, token: Freshworks} # 121 posts, 5 match (Chennai HQ)
+  - {name: Bosch,         ats: smartrecruiters, token: BoschGroup} # 4730 posts, 169 match (BGSW India)
+  - {name: Wise,          ats: smartrecruiters, token: Wise}       # fintech, Hyderabad hub
+  - {name: Ubisoft,       ats: smartrecruiters, token: Ubisoft2}   # Pune/Mumbai studios
+  - {name: Smartsheet,    ats: greenhouse, token: smartsheet}      # 8 match
+  - {name: SingleStore,   ats: greenhouse, token: singlestore}     # 7 match
+  - {name: ClickHouse,    ats: greenhouse, token: clickhouse}      # 4 match (remote India)
+  - {name: Zuora,         ats: greenhouse, token: zuora}           # 4 match
+  - {name: Netskope,      ats: greenhouse, token: netskope}        # 3 match
+  - {name: Yugabyte,      ats: greenhouse, token: yugabyte}        # 3 match
+  - {name: Aerospike,     ats: greenhouse, token: aerospike}       # 2 match
+  - {name: Apollo.io,     ats: greenhouse, token: apolloio}        # 2 match
+  - {name: Sumo Logic,    ats: greenhouse, token: sumologic}       # 2 match
+  - {name: Turing,        ats: greenhouse, token: turing}          # AI, remote-India
+  - {name: Commure,       ats: ashby,      token: commure}         # 1 match
+
+  # ── Custom-site adapters (Jul-16 2026): own career sites w/ public JSON ─
+  - {name: Amazon,          ats: amazon}                           # amazon.jobs, ~190 India match
+  - {name: Uber,            ats: uber}                             # careers API, few India roles now
+  - {name: JPMorgan Chase,  ats: oracle, host: jpmc.fa.oraclecloud.com, site: CX_1001}  # 431 fetched, finance
+
+  # ── Indian-ATS adapters (Jul-16 2026, round 2): Keka + ainterviews ─
+  #    keka token = tenant/orgGuid (guid is in the /careers/ page source)
+  - {name: Jupiter,   ats: keka, token: jupiter/b5279857-cf81-4dde-a215-fc48957ee2b5}  # fintech, 13 jobs
+  # Cars24 keka tenant REMOVED Jul-16: it's their UAE ops board (all
+  # Dubai/Sharjah, sales/logistics roles). India tech hiring goes via
+  # careers.cars24.com (custom Next.js, no public API).
+  - {name: Lenskart,  ats: ainterviews, token: lenskart_ho}        # 45 jobs
+
+  # ── Jul-23 2026: cracked with a real browser (Claude-in-Chrome) ──
+  #  The careers SPA is JS-rendered, so probing the HTML found nothing and this
+  #  was written off on Jul-16 as "no public JSON". Loading the page and reading
+  #  the network tab exposed the POST endpoint in one shot. token = tenant.
+  #  Other tenants probed and dead: flipkart/zomato/zepto/dream11/cred/phonepe/
+  #  nykaa/lenskart/blinkit/dunzo = 417 "Invalid company short name";
+  #  meesho = 200 but an empty board (they hire via greenhouse, already watched).
+  - {name: Swiggy,    ats: mynexthire,  token: swiggy}             # 118 roles, 7 India eng
+
+  # Round-2 sweep (Jul-23): YC-India + topstartups.io + placement-sheet names.
+  # ~160 probed, only these 3 had India eng roles — more evidence that Indian
+  # companies mostly DON'T use Greenhouse/Lever/Ashby.
+  - {name: Hevo Data,   ats: lever,           token: hevodata}     # 6 India (placement sheet)
+  - {name: Lendingkart, ats: smartrecruiters, token: lendingkart}  # 1 India
+  - {name: Kodo,        ats: smartrecruiters, token: kodo}         # 1 India
+
+  # Workable — public widget API, no auth, ?details=true returns full JDs.
+  # ~90 Indian companies probed against it; Apna is the only one with a board.
+  - {name: Apna,        ats: workable,        token: apna}         # 122 roles, 75 India
+
+  # ── Aggregator (not a single company's board) ────────────────
+  #  Every entry above is one company hand-verified one at a time, and the
+  #  Jul-23 sweeps showed that well is nearly dry for India: ~490 companies
+  #  probed across two rounds yielded 18 boards and ~135 India roles. Adzuna
+  #  instead aggregates thousands of Indian sources behind one API, so it is
+  #  the only lever here that scales without more hand-probing.
+  #  INERT until both secrets exist — free keys at https://developer.adzuna.com
+  #  then: gh secret set ADZUNA_APP_ID -b '…' ; gh secret set ADZUNA_APP_KEY -b '…'
+  #  Each job keeps its REAL employer name, so dedupe, the per-company cap and
+  #  the referral lookup all still work. ~5 calls/run against a ~1000/month tier.
+  - {name: Adzuna India, ats: adzuna, token: ""}
+
+  # ── Jul-23 2026 supply sweep ─────────────────────────────────
+  #  ~330 companies probed against greenhouse/lever/ashby/smartrecruiters
+  #  (3 slug variants each). 76 live boards found, but only these have
+  #  India-matching eng roles today — the rest are US/EU-only headcount.
+  #  Counts = India matches at probe time. Lesson recorded in the log:
+  #  the Greenhouse/Lever well is largely dry for India; India volume
+  #  lives on Workday + the big custom boards (Amazon 184, Bosch 173).
+  - {name: Level AI,   ats: lever,      token: levelai}            # 10 India
+  - {name: Sigmoid,    ats: greenhouse, token: sigmoid}            #  6 India
+  - {name: ZoomInfo,   ats: greenhouse, token: zoominfo}           #  4 India
+  - {name: Nasuni,     ats: greenhouse, token: nasuni}             #  4 India
+  - {name: Fivetran,   ats: greenhouse, token: fivetran}           #  4 India
+  - {name: New Relic,  ats: greenhouse, token: newrelic}           #  2 India
+  - {name: JFrog,      ats: greenhouse, token: jfrog}              #  1 India
+  - {name: Sonatype,   ats: lever,      token: sonatype}           #  1 India
+  - {name: Skyflow,    ats: ashby,      token: skyflow}            #  1 India
+  - {name: Highspot,   ats: lever,      token: highspot}           #  1 India
+  - {name: Outreach,   ats: lever,      token: outreach}           #  1 India
+  - {name: Fastly,     ats: greenhouse, token: fastly}             #  1 India
+  - {name: Roblox,     ats: greenhouse, token: roblox}             #  1 India
+
+  #  …and the same sweep against Workday tenants, which is where the India
+  #  volume actually is: 4 new boards → 96 India roles, vs 14 Greenhouse/Lever
+  #  boards → 39. Prefer Workday when hunting for more supply.
+  - {name: Applied Materials, ats: workday, host: amat.wd1.myworkdayjobs.com,     tenant: amat,     site: External}  # 45 India
+  - {name: Micron,            ats: workday, host: micron.wd1.myworkdayjobs.com,   tenant: micron,   site: External}  # 40 India
+  - {name: 3M,                ats: workday, host: 3m.wd1.myworkdayjobs.com,       tenant: "3m",     site: Search}    # 10 India
+  - {name: Sprinklr,          ats: workday, host: sprinklr.wd1.myworkdayjobs.com, tenant: sprinklr, site: Careers}   #  1 India
+
+# ─────────────────────────────────────────────────────────────
+#  PHASE 2b — slug hunt completed Jul 2026. Resolved: Expedia +
+#  Thomson Reuters (Workday), ServiceNow (SmartRecruiters), NetApp
+#  (Eightfold) — all integrated above. Confirmed NOT free-API
+#  (proprietary ATS, custom adapter/scraper needed): HSBC (Avature),
+#  Standard Chartered (SuccessFactors), Dell (Oracle Cloud), Booking
+#  (iCIMS), Nutanix (Jobvite), Uber/UiPath/TomTom/Wayfair/Rakuten/
+#  Visa (custom career sites).
+#  Boards that resolve but have 0 postings via API: Freshworks,
+#  Hotstar, HubSpot, Optiver (lever/greenhouse tokens exist, empty).
+#  Job SITES evaluated Jul 2026 — all skipped: Wellfound/Instahyre/
+#  Underdog (login-walled, no public API), jobs24x.com (parked
+#  domain), Remotive (public API but ~30 mostly non-eng worldwide
+#  gigs, no India-specific roles — no value over company boards).
+#  Custom-site / other ATS (own adapter needed): Atlassian,
+#  Swiggy, Zepto, Zerodha, Cashfree, Juspay, Setu, Jupiter,
+#  Perfios, Pine Labs, Navi, BrowserStack, Chargebee, Grammarly,
+#  HashiCorp, Canva, DoorDash.
+#  RESOLVED Jul-16 2026: Razorpay (greenhouse token
+#  razorpaysoftwareprivatelimited, found in page source), Freshworks +
+#  Wise (SmartRecruiters), Paytm (lever), Amazon/Uber/JPMC (custom
+#  adapters in ats.py: amazon.jobs JSON, Uber internal API w/ dummy
+#  csrf header, Oracle HCM CE REST).
+#  PROBED & PARKED Jul-16 2026 (no public JSON): Microsoft (careers
+#  moved behind apply.careers.microsoft.com static stack, old
+#  gcsservices API host unreachable from India — MAY still work from
+#  US IPs like the GH runner; retry there if wanted), Google
+#  (HTML-embedded data only), Atlassian (endpoints/careers now 401s),
+#  Flipkart (flipkartcareers.com jQuery site, no API), Swiggy (real
+#  ATS = swiggy.mynexthire.com, board is JS-rendered, no public JSON
+#  found), Zomato→Eternal (custom React, no visible API), Zepto
+#  (zepto.talentrecruit.com, bot-blocked 403), Dream11 (moved off
+#  Lever, careers domain dead), Navi (TurboHire — unprobed API,
+#  possible future crack). ~140 greenhouse/lever/ashby token guesses
+#  for other Indian startups all 404.
+#  ── RE-EXAMINED Jul-23 2026 in a real browser (network tab). Three
+#  of the above verdicts were wrong or are now settled for good:
+#  * Swiggy  → SOLVED. Added above via the new `mynexthire` adapter.
+#    Lesson: "no public JSON" reached by reading HTML is worthless on a
+#    JS-rendered board — the XHR only exists once the JS runs.
+#  * Zomato/Eternal → CLOSED PERMANENTLY, and not for technical reasons.
+#    eternal.com/careers states: "we only accept applications through
+#    employee referrals". There is no board to find, for Zomato, Blinkit,
+#    District or Hyperpure. Only the referral path works — do not re-probe.
+#  * Flipkart → real board is flipkart.turbohire.co (org guid
+#    4d757ba0-3d57-448a-b82c-238ed87ac90f), API host thapi.azurewebsites.net
+#    under /api/careerpage/*. Needs a bearer token the SPA holds, and the
+#    board is only ~11 mostly-vendor roles, so not worth the effort. If
+#    TurboHire is ever cracked, it also unlocks Navi.
+#  CRACKED Jul-16 2026 (round 2) — Indian-ATS public endpoints:
+#  * Keka:  https://{tenant}.keka.com/careers/api/embedjobs/default/
+#    active/{orgGuid} (guid in /careers/ page source under
+#    /ats/documents/{guid}/). Found: Jupiter, Cars24. To add more Keka
+#    companies: check {tenant}.keka.com/careers/ exists, grab guid.
+#  * ainterviews.com: /api/job_board/{slug}/jobs/ (Lenskart =
+#    lenskart_ho).
+#  Wellfound/Instahyre/Underdog stay impossible without login +
+#  residential IP (Cloudflare-blocked, ToS-banned scraping);
+#  workatastartup (YC) search API needs login too.
+# ─────────────────────────────────────────────────────────────

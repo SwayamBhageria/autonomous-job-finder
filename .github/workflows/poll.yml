@@ -1,0 +1,100 @@
+name: job-finder
+
+on:
+  schedule:
+    - cron: "0,30 * * * *"     # every 30 min (UTC). Jobs rarely need faster.
+  workflow_dispatch:            # lets you trigger a run by hand from the Actions tab
+    inputs:
+      test_slack:
+        description: "Send a Slack test ping instead of polling"
+        type: boolean
+        default: false
+      golive:
+        description: "Re-score ALL currently-open matches and notify (after adding boards / lowering the bar)"
+        type: boolean
+        default: false
+      backlog:
+        description: "Score ALL open matches and upload queue.html as an artifact (no Slack, no state change)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write               # to commit the updated seen_jobs.json back
+
+concurrency:
+  group: job-finder
+  cancel-in-progress: false
+
+jobs:
+  poll:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - run: pip install -r requirements.txt
+
+      - name: Slack test ping (sample alert)
+        if: inputs.test_slack
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        run: python notify.py
+
+      - name: Poll boards and notify
+        if: ${{ !inputs.test_slack && !inputs.backlog }}
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          # ats.adzuna reads these from the environment and returns [] when
+          # unset — so without them the aggregator no-ops silently in CI.
+          ADZUNA_APP_ID: ${{ secrets.ADZUNA_APP_ID }}
+          ADZUNA_APP_KEY: ${{ secrets.ADZUNA_APP_KEY }}
+        run: python poller.py ${{ inputs.golive && '--golive' || '' }}
+
+      # Backlog sweep: scores every currently-open match (not just the new
+      # ones) and produces the full ranked apply queue as a downloadable page.
+      # Deliberately touches neither Slack nor the state file.
+      - name: Build backlog apply queue
+        if: ${{ inputs.backlog }}
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          ADZUNA_APP_ID: ${{ secrets.ADZUNA_APP_ID }}
+          ADZUNA_APP_KEY: ${{ secrets.ADZUNA_APP_KEY }}
+        run: python poller.py --backlog
+
+      - uses: actions/upload-artifact@v4
+        if: ${{ inputs.backlog }}
+        with:
+          name: apply-queue
+          path: queue.html
+          retention-days: 14
+
+      - name: Persist seen-jobs state
+        if: ${{ !inputs.test_slack && !inputs.backlog }}
+        run: |
+          git config user.name  "job-finder-bot"
+          git config user.email "actions@github.com"
+          git add state/seen_jobs.json state/outreach.json
+          if git diff --cached --quiet; then
+            echo "No state change."
+            exit 0
+          fi
+          git commit -m "state: update seen jobs + outreach [skip ci]"
+          # A bare `git push` fails whenever anything else lands on main during
+          # the run (a hand-pushed commit, or an overlapping scheduled run).
+          # That's not cosmetic: losing the state write means every role in this
+          # batch is "new" again next run and gets re-alerted. Rebase and retry.
+          for attempt in 1 2 3; do
+            if git push; then
+              echo "State pushed (attempt $attempt)."
+              exit 0
+            fi
+            echo "Push rejected, rebasing and retrying ($attempt/3)…"
+            git pull --rebase --autostash origin main || exit 1
+          done
+          echo "::error::Could not push state after 3 attempts."
+          exit 1

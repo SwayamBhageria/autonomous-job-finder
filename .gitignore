@@ -1,0 +1,32 @@
+# ── Never commit: personal identity, CV text, salary floor ──
+profile.yaml
+
+# ── Never commit: your actual job-search state ──
+# seen_jobs.json / outreach.json record which roles you've been shown and
+# which companies you're targeting. Personal, and useless to anyone else.
+state/
+
+# ── Generated artifacts ──
+queue.html
+outreach.html
+
+# ── Secrets ──
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+credentials.json
+token.json
+token.json.bak
+
+# ── Python ──
+__pycache__/
+*.pyc
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+
+# ── OS ──
+.DS_Store
