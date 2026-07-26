@@ -1,8 +1,12 @@
 name: job-finder
 
+# NOTE: the scheduled trigger is intentionally commented out in this public
+# repo — without a profile.yaml (gitignored: it holds your identity, CV, and
+# salary floor) every run would fail. Uncomment it once you've configured your
+# own fork and added the repo secrets.
 on:
-  schedule:
-    - cron: "0,30 * * * *"     # every 30 min (UTC). Jobs rarely need faster.
+  # schedule:
+  #   - cron: "0,30 * * * *"   # every 30 min (UTC). Jobs rarely need faster.
   workflow_dispatch:            # lets you trigger a run by hand from the Actions tab
     inputs:
       test_slack:
