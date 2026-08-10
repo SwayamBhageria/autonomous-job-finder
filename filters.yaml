@@ -1,5 +1,5 @@
 # ─────────────────────────────────────────────────────────────
-#  Targeting — full-stack + AI/ML roles, India. Tune to taste.
+#  Targeting — tune every list below to your own stack, level, and market
 #  Everything here is tunable. Re-run and it takes effect next poll.
 # ─────────────────────────────────────────────────────────────
 
@@ -22,6 +22,14 @@ title_include:
   # Adobe (and a few others) title their SDE roles "Computer Scientist I/II" —
   # ~12 India roles were being missed outright by the include list.
   - computer scientist
+  # Forward-deployed, spelled out. `engineer` already catches "Forward Deployed
+  # Engineer", so these two are for the variants that drop the word — the
+  # Palantir-lineage "Deployment Strategist" being the one that actually exists.
+  # FDE is a first-class target as of 2026-08-09 (a deliberate call); the weighting
+  # that actually moves the score lives in profile.yaml target_roles and the
+  # gemini_fit prompt, not here — this only decides what gets looked at.
+  - forward.?deployed
+  - deployment strategist
 
 # If the title matches any of these, it's dropped (too senior / not eng / intern).
 title_exclude:
@@ -39,6 +47,17 @@ title_exclude:
   - architect
   - president
   - \blead\b            # comment out if you want tech-lead roles too
+  # ── seniority markers in the title ──
+  # These were only ever a -15 heuristic nudge, which Gemini then out-voted: 16
+  # rows in the cockpit are "Senior Full Stack Developer" / "Sr Analyst III" /
+  # "Software Engineer III", all scored 50-70 into B-tier. At ~1 yr of
+  # experience none of them are winnable, so drop them at the title, the same
+  # way `principal` and `staff` already are. Note "II" is deliberately NOT here:
+  # "Software Engineer II" is the band that actually converts.
+  - senior
+  - \bsr\.?\b
+  - \biii\b
+  - \biv\b
   - sales
   - account executive
   - recruit
@@ -53,6 +72,12 @@ title_exclude:
   - infosec
   - security engineer
   - service delivery
+  # Kept excluded even though FDE is now a first-class target (2026-08-09). In
+  # this corpus — heavily Indian IT services — "Delivery Engineer" is ops/
+  # managed-services, not forward-deployed product work, and the FDE roles that
+  # actually appear title themselves "Forward Deployed Engineer" or
+  # "Implementation Engineer" (both of which pass). Revisit if a real FDE role
+  # is ever seen carrying this title.
   - delivery engineer
   - \bsdet\b
   - in test
@@ -62,7 +87,28 @@ title_exclude:
   - engineer.{0,4}testing
   - \btest(ing)? engineer\b
   - quality analyst
-  - embedded
+  # `embedded` alone was too greedy, and it misfired on exactly the roles
+  # you most want. "Embedded" has two unrelated meanings in job titles:
+  # firmware-on-a-chip, and embedded-WITH-a-customer-team (the FDE sense).
+  # Sarvam AI — an Indian AI lab whose "Backend Engineer, Chanakya" is already
+  # an 88 in the cockpit — posts "Embedded Data Scientist, Chanakya" and
+  # "Embedded Infrastructure Engineer, Chanakya" alongside its "Forward
+  # Deployed Engineer", and the bare term dropped both before anything scored
+  # them. So require the word that makes it hardware.
+  # The rule is ADJACENCY: exclude when the word right after "embedded" is a
+  # technology, keep it when that word is a job function. "Embedded SW Engineer"
+  # is firmware; "Embedded Data Scientist" / "Embedded Infrastructure Engineer"
+  # are FDE. Because the tech word must sit immediately after "embedded", a
+  # qualified function noun in between is what protects the FDE titles.
+  # Calibrated against all 68 India titles containing "embedded", not a
+  # hand-written list — the first draft leaked 13 real firmware roles that the
+  # test cases missed: Bosch "Embedded_Linux_Developer" (underscore separator),
+  # Aptiv "Embedded SW Engineer" (SW, not software), Applied Materials
+  # "Embedded C Developer" (bare C), Honeywell "Advanced Embedded Engr".
+  # Separator class covers Qualcomm's "C/Embedded/Video Codec" and Bosch's
+  # underscore-delimited titles. `c\b` cannot hit "Embedded Cloud" — the word
+  # boundary stops it.
+  - embedded[\s/&,_-]*(systems?|software|sw\b|linux|firmware|hardware|c\b|c\+\+|android|video|device|platform|engineer\b|engr\b)
   - firmware
   - hardware
   - solution engineer
@@ -71,6 +117,29 @@ title_exclude:
   - customer engineer
   - backline
   - pre.?sales
+  # ── fixed-term employment (added 2026-08-09) ──
+  # Flagged during the 2026-07-27 Amazon referral hunt — "most top entry-level
+  # hits are FTC/Contractor fixed-term traps and fit.py does not exclude them
+  # yet" — and never built, so they kept scoring like permanent roles. The cost
+  # was not theoretical: Amazon "Software Development Engineer I FTC" was
+  # sitting at **90**, joint-top of the cockpit, because a fixed-term contract
+  # reads to the scorer exactly like the SDE I role he wants. These are not a
+  # fit question, they are an employment-type question, which is why the
+  # Gemini gate never demotes them.
+  # Calibrated against all 625 titles that have passed the filters in 90 days:
+  # every one of the 5 hits is a genuine fixed-term role (Amazon FTC, Highspot
+  # "6 Month FTC", Agoda "6 Month Contract", PubMatic ×2 "On Contract") and
+  # there are zero false positives.
+  # `contract` carries a negative lookbehind because "Smart Contract Engineer"
+  # is a real permanent full-stack title and Coinbase/Zeta are polled boards —
+  # the one foreseeable way this rule could eat a role he wants.
+  - \bftc\b
+  - fixed[ -]?term
+  - (?<!smart )(?<!smart-)\bcontract(s|or|ual)?\b
+  - \btemporary\b
+  - \bpart[ -]?time\b
+  - \bapprentice(ship)?\b
+  - \btrainee\b
 
 # Location must match one of these (India cities + India-remote).
 location_include:
@@ -87,6 +156,62 @@ location_include:
   - chennai
   - kolkata
 
+# ── Employers to skip entirely ───────────────────────────────
+# The Adzuna aggregator posts on behalf of whoever paid, which is mostly IT
+# staffing and body-shop consultancies reposting the same req. 60% of the
+# cockpit came from Adzuna, and its listings can't be liveness-checked (there's
+# no board to re-poll), so a dead agency repost sits there for three weeks.
+# Matched case-insensitively against the employer name.
+company_exclude:
+  - happiest
+  - trigent
+  - artech
+  - changeleaders
+  - scout incorporation
+  - jobgether
+  - \baqm\b
+  - synechron
+  - zensar
+  - \bcgi\b
+  - kyndryl
+  - \bntt\b
+  - collabera
+  - randstad
+  - \bteamlease\b
+  - quess
+  - hexaware
+  - mphasis
+  - larsen
+  - \bltim(indtree)?\b
+  - virtusa
+  - \bucs\b
+  - staffing
+  - consultancy
+  - consultants
+  - manpower
+  # Anchored so real product companies survive: bare `talent` would have killed
+  # Talentica, and bare `recruit` anything with "Recruiting" in a subsidiary name.
+  - \brecruit(ing|ment)?\b
+  - \btalent\b
+  # Aug-06 2026: seen on Naukri's Bengaluru/Delhi engineering searches, which
+  # the browser harvest now feeds in. Naukri is roughly half staffing firms
+  # reposting the same req, so this list has to grow with it — that is the
+  # rent for the source, and it is cheaper than dropping the source.
+  - diverse lynx
+  - creative hands
+  - cerebraix
+  - diatoz
+  - \biflow\b
+  - techf
+  - hexerve
+  - eudemonic
+  - sigma allied
+  - jrd systems
+  - fortified infotech
+  - clouwood
+  - \binfinite\b
+  - cloudthat
+
 # Also match "Remote - India" style strings even if a city isn't named.
 remote_india: true
 # Match a bare "Remote" with no country? (noisy — usually US-remote). Default off.
@@ -94,6 +219,43 @@ include_generic_remote: false
 
 # How long to remember a job id before forgetting it (keeps state file small).
 forget_after_days: 90
+
+# ── Cockpit shelf life ───────────────────────────────────────
+# A flat 21-day retention with ~25 new roles/day is a list that only grows: by
+# Aug 5 the cockpit held 222 rows, of which 31 had a working Apply link. A
+# worklist you can't finish in a day stops being a worklist. So retention is now
+# per-kind, shortest for the rows least likely to be worth an application.
+#
+# A-tier carries referral outreach — a sent DM deserves a couple of weeks for a
+# reply — so it keeps the longest life.
+outreach_forget_days: 14
+# B-tier is a volume lottery. A two-week-old bulk posting is not worth an apply,
+# and it's the tier that does the flooding.
+bulk_forget_days: 7
+# Aggregator rows have no board to re-poll, so we can never prove they're still
+# open, and their postings go stale fastest.
+unverified_forget_days: 7
+# Once a posting is confirmed gone, show it as closed for this long (so a row
+# doesn't just silently vanish mid-worklist) and then drop it.
+closed_grace_days: 2
+# A role must be missing from its board this many consecutive runs before the
+# cockpit calls it closed — one miss can just be a board serving a partial page.
+closed_after_misses: 2
+# Hard ceiling on the cockpit, applied last: A-tier is kept first, then the
+# best-scoring/newest B-tier. The roles it sheds are NOT re-alerted
+# (seen_jobs.json remembers them for 90 days), so this is a real clear, not a
+# deferral — which is exactly why it had to go when the per-run caps did.
+#
+# 60 here plus uncapped alerting would have been the worst of both: roles get
+# scored, alerted, written to the cockpit, then silently deleted on the same
+# run and never shown again. That destroys good roles instead of queueing them.
+#
+# 0 = no ceiling. The page is now bounded by RETENTION and LIVENESS instead —
+# outreach_forget_days / bulk_forget_days above, plus the per-run re-check that
+# marks closed roles. That is the honest bound: the 222-row mess of Aug-05 was
+# 191 rows with DEAD apply links, which is a liveness failure, not a volume one.
+# If the page gets long but every row is live and in-date, that is working.
+outreach_max_rows: 0
 
 # ── Quality gate (fit scoring) ───────────────────────────────
 # HARD DROP: if the JD states a required experience of this many years or
@@ -119,13 +281,81 @@ heuristic_floor: 35
 #   B-tier (bulk_threshold … notify_threshold) → compact bulk-apply list, no
 #       outreach drafts, autofill-and-submit. Cheap per role, lottery odds.
 #       This is the tier that was being thrown away.
-notify_threshold: 72
-bulk_threshold: 48
-# Never send more than this many A-tier roles in one run (ranked best-first).
-max_per_run: 20
-# ...and up to this many B-tier roles, as a compact list.
-max_bulk_per_run: 40
-# Max roles from a single company per batch, so one company can't flood you.
-max_per_company: 3
-# B-tier is a volume channel, so one company may contribute more there.
-max_bulk_per_company: 8
+#
+# 72 → 70, 2026-08-08. The bar was sitting in a QUANTIZATION DEAD ZONE and
+# nobody could see it. The scorer only ever emits multiples of 5 — the live
+# cockpit holds 50/55/60/65/70/75/80/85/90/95 and nothing in between — so a
+# threshold of 72 is not "slightly above 70", it is EXACTLY 75, and it silently
+# demoted the single largest bucket on the board: 43 of 168 rows scored exactly
+# 70. `>=72` and `>=75` both return 36 rows; `>=70` returns 79.
+#
+# What was in that 70 bucket is the argument. It is not marginal filler — it is
+# the closest thing on the page to his actual resume:
+#   RWS  "Frontend - Angular Claude AI Developer" · "React - Node - Claude AI Developer"
+#   Amgen Hyderabad ×13 — "Associate Software Engineer", "Full Stack Software
+#         Engineer", "Machine Learning Engineer, AI Studio"
+#   CRED (a referral company) "machine learning engineer" · Microsoft "Software
+#         Engineer" Bangalore · Red Hat · Unacademy "SWE, Backend" ·
+#         Barclays "Full Stack Developer" · Fractal "Fullstack Developer"
+# Those were going to the bulk-apply lottery while weaker roles got the referral
+# treatment. This is the stated goal — enough A-tier that B-tier is not
+# needed — and it was one integer away the whole time, not another board.
+#
+# If the scorer ever emits finer-grained values, re-check this: the right bar is
+# "the top bucket that is still on-profile", not a round number.
+notify_threshold: 70
+
+# B-TIER OFF, 2026-08-08 — a deliberate call, made once A-tier could carry the load.
+# Bulk is the band [bulk_threshold, notify_threshold), so setting the floor equal
+# to the ceiling empties it: no bulk Slack message, and nothing below 70 enters
+# the cockpit. It is a ONE-NUMBER reversal — put this back to 48 to re-enable.
+#
+# Why now and not before: at the old bar A-tier was 36 rows and bulk was doing
+# the volume, so switching it off would have left him with almost nothing. The
+# 72 → 70 fix above moved 43 roles up, so A-tier is 79 and B-tier is the
+# lottery-odds tail it was always described as. The point of the two tiers was
+# never "send everything" — it was that discarding the tail forever was wasteful
+# when the tail was all he had.
+#
+# Consequence to keep in mind: seen_jobs holds 90 days, so a role skipped now is
+# NOT re-alerted if this is turned back on. Turning bulk off is a decision to
+# not see those roles at all, not to defer them.
+bulk_threshold: 70
+
+# ── Ceiling for roles whose JD we could not read, 2026-08-08 ──
+# Must stay STRICTLY BELOW notify_threshold. It didn't, and that was a real bug:
+# the fit-gate prompt capped unreadable listings at 70, and 72 → 70 moved the
+# A-tier bar onto that exact number — so "we couldn't read this JD" and "this is
+# referral-worthy" became the same score. 44 of 181 cockpit rows sat at exactly
+# 70 with the reason "unverified JD", 6 of them already promoted into A-tier.
+#
+# It is only half a scoring knob. The other half was ats._get_detail: those JDs
+# were mostly not teasers at all, they were Workday 429s from hitting one tenant
+# 12-wide, now throttled. This number is the backstop for what stays unreadable
+# (Adzuna/inbox teasers, which genuinely have no JD to fetch).
+unverified_ceiling: 65
+
+# ── VOLUME CAPS REMOVED, 2026-08-06 — a deliberate call, and the evidence backs it ─
+#
+# All four were set when Slack was the worklist and a flood was unreadable. The
+# `outreach` cockpit replaced that: he now works a ranked page, not a feed, so
+# the thing that should decide what reaches him is FIT AND NOTHING ELSE.
+#
+# What these caps were actually doing: on 2026-08-06 Amazon alone fetched 216
+# roles → 141 title/location matches → 103 clearing the floor and experience
+# cutoff (SDE II at 85, Amazon Pay SDE at 76). `max_per_company: 3` let three
+# through. He reported seeing ~5 Amazon roles in a week and assumed the poller
+# wasn't finding them; it was finding ~100 and throwing them away. seen_jobs.json
+# agrees — Amazon is the SECOND-biggest source ever recorded (287 roles, 54 in
+# the last fortnight), ahead of Mastercard (131 / 31). The system was never
+# supply-starved. It was throughput-limited, and the limit was here.
+#
+# 0 = no cap. poller.py turns that into infinity; a literal 0 through `take()`
+# would send one role, not all of them.
+max_per_run: 0
+max_bulk_per_run: 0
+max_per_company: 0
+max_bulk_per_company: 0
+# Restore a number here if a single company ever genuinely drowns the page —
+# but check WHICH company first. One board flooding is usually a filter bug
+# (a title_exclude that stopped matching), not a company that started hiring.

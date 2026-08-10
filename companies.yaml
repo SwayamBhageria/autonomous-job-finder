@@ -62,7 +62,8 @@ companies:
   # ── Added Jul 2026 from placement-sheet + list (verified live) ─
   - {name: PubMatic,      ats: greenhouse, token: pubmatic}      # 25 India, 13 match
   - {name: Pure Storage,  ats: greenhouse, token: purestorage}   # 68 India, 13 match
-  - {name: Tekion,        ats: greenhouse, token: tekion}        # 39 India, 10 match
+  # Migrated off Greenhouse ~Aug 2026 (the old board 404s). Ashby: 69 open, 52 India.
+  - {name: Tekion,        ats: ashby,      token: tekion}        # 52 India
   - {name: Tide,          ats: greenhouse, token: tide}          # 46 India, 6 match (fintech)
   - {name: Glean,         ats: greenhouse, token: gleanwork}     # 27 India (AI)
   - {name: Rubrik,        ats: greenhouse, token: rubrik}        # 21 India
@@ -128,7 +129,7 @@ companies:
   - {name: Zuora,         ats: greenhouse, token: zuora}           # 4 match
   - {name: Netskope,      ats: greenhouse, token: netskope}        # 3 match
   - {name: Yugabyte,      ats: greenhouse, token: yugabyte}        # 3 match
-  - {name: Aerospike,     ats: greenhouse, token: aerospike}       # 2 match
+  - {name: Aerospike,     ats: rippling,   token: aerospike-inc}   # left greenhouse Aug-26
   - {name: Apollo.io,     ats: greenhouse, token: apolloio}        # 2 match
   - {name: Sumo Logic,    ats: greenhouse, token: sumologic}       # 2 match
   - {name: Turing,        ats: greenhouse, token: turing}          # AI, remote-India
@@ -167,17 +168,48 @@ companies:
   # ~90 Indian companies probed against it; Apna is the only one with a board.
   - {name: Apna,        ats: workable,        token: apna}         # 122 roles, 75 India
 
-  # ── Aggregator (not a single company's board) ────────────────
-  #  Every entry above is one company hand-verified one at a time, and the
-  #  Jul-23 sweeps showed that well is nearly dry for India: ~490 companies
-  #  probed across two rounds yielded 18 boards and ~135 India roles. Adzuna
-  #  instead aggregates thousands of Indian sources behind one API, so it is
-  #  the only lever here that scales without more hand-probing.
-  #  INERT until both secrets exist — free keys at https://developer.adzuna.com
-  #  then: gh secret set ADZUNA_APP_ID -b '…' ; gh secret set ADZUNA_APP_KEY -b '…'
-  #  Each job keeps its REAL employer name, so dedupe, the per-company cap and
-  #  the referral lookup all still work. ~5 calls/run against a ~1000/month tier.
-  - {name: Adzuna India, ats: adzuna, token: ""}
+  # ── Aggregator — OFF, 2026-08-09. a deliberate call, and the numbers agree ──
+  #  Adzuna aggregates thousands of Indian sources behind one API, which made it
+  #  the only lever that scaled without hand-probing each company. It is off
+  #  because it returns a ~200-char TEASER, never a job description.
+  #
+  #  That is fatal against the current gates, and the arithmetic is not close:
+  #      _snippet_note()    marks a desc < 400 chars "[PARTIAL LISTING]"
+  #      unverified_ceiling caps anything so marked at 65
+  #      notify_threshold   is 70   → an Adzuna row can never reach A-tier
+  #      bulk_threshold     is 70   → and with B off there is nowhere below it
+  #  Measured on the 2026-08-09 sweep: 200 postings → 87 title/location matches
+  #  → 0 reached A-tier, while every other source produced some (Workday 23,
+  #  Oracle 9, SmartRecruiters 7). It was pure cost: ~15 calls/day, and 87
+  #  phantom "matches" per run making supply look healthier than it was.
+  #
+  #  WHY IT LOOKED LIKE IT WORKED, which is the part worth not re-learning:
+  #  before 2026-08-08 the unread ceiling was ALSO 70, so "we could not read
+  #  this JD" and "this is referral-worthy" were the same number. 17 of its 34
+  #  cockpit rows sat at exactly 70 and 31 of 34 read "unverified JD". Moving
+  #  the ceiling to 65 did not break Adzuna — it revealed that Adzuna had never
+  #  been contributing, only inflating the count.
+  #
+  #  Re-enabling it needs a REAL JD, not a lower bar — an explicit call is
+  #  that he does not want bulk rows with no JD, so dropping bulk_threshold back
+  #  to 48 to catch these is the wrong fix. The teaser links to an adzuna.in
+  #  landing page (not the employer), and that page answers 429 to the very
+  #  first anonymous request — so a GitHub runner cannot fetch it. If it ever
+  #  comes back it goes through harvest/ on his Mac like Naukri, and only then.
+  #  Note company_exclude in filters.yaml STAYS: the harvest inbox feeds the
+  #  same staffing-firm reposts this list was grown to screen.
+  # - {name: Adzuna India, ats: adzuna, token: ""}
+
+  # ── Browser-harvested inbox (Aug-06 2026) ────────────────────
+  #  Reads state/inbox/*.jsonl, written by the nightly `/harvest` run that
+  #  drives Chrome on your Mac (harvest/sources.yaml for the company list).
+  #  This is the answer to the "login-walled / no public API" verdicts below:
+  #  those are true for a GitHub runner making an anonymous GET, and false for
+  #  a real browser. Naukri alone reaches ~40 Indian companies — Flipkart,
+  #  Swiggy, Zepto, Zerodha, Zoho — that have NO reachable API board and so
+  #  were entirely invisible to this poller before.
+  #  Inert until the first harvest runs: no files, no jobs, no error.
+  - {name: Harvest inbox, ats: inbox, token: ""}
 
   # ── Jul-23 2026 supply sweep ─────────────────────────────────
   #  ~330 companies probed against greenhouse/lever/ashby/smartrecruiters
@@ -207,6 +239,320 @@ companies:
   - {name: Micron,            ats: workday, host: micron.wd1.myworkdayjobs.com,   tenant: micron,   site: External}  # 40 India
   - {name: 3M,                ats: workday, host: 3m.wd1.myworkdayjobs.com,       tenant: "3m",     site: Search}    # 10 India
   - {name: Sprinklr,          ats: workday, host: sprinklr.wd1.myworkdayjobs.com, tenant: sprinklr, site: Careers}   #  1 India
+
+  # ── Aug-06 2026: found by DISCOVERY, not by guessing slugs ───
+  #  New method, and the one to repeat when supply runs dry: sweep Naukri's
+  #  Bengaluru engineering searches in Chrome, collect the employer names off
+  #  the result cards, then probe those names against the free ATS APIs. It
+  #  finds India-hiring companies a slug-guessing sweep never would, because
+  #  the evidence that they're hiring comes first and the board comes second.
+  #  25 names from the sweep → 4 boards. The misses are informative too:
+  #  Cisco, Walmart, Akamai, Cargill, Lowe's, Fujitsu, Capgemini, TE
+  #  Connectivity and Qualcomm are on proprietary ATSes — do not re-probe.
+  - {name: Analog Devices, ats: workday, host: analogdevices.wd1.myworkdayjobs.com, tenant: analogdevices, site: External}  # 126 open, 20 India on pg1
+  - {name: Equinix,        ats: workday, host: equinix.wd1.myworkdayjobs.com,       tenant: equinix,       site: External}  # 37 open
+  - {name: Equifax,        ats: workday, host: equifax.wd5.myworkdayjobs.com,       tenant: equifax,       site: External}  # 23 open
+  - {name: Visa,           ats: smartrecruiters, token: visa}   # tiny board (2), but it's the real Visa one
+
+  # ── Aug-06 2026: from a 121-company target list ───────
+  #  48 of his 121 were already polled. The remaining 73 were probed across
+  #  greenhouse/lever/ashby/smartrecruiters, then the survivors against
+  #  Workday. These are the ones with live boards.
+  - {name: Harness,        ats: greenhouse,      token: harnessinc}      # 37 India / 92
+  - {name: Sandisk,        ats: smartrecruiters, token: sandisk}         # 29 India / 100
+  - {name: Redis,          ats: ashby,           token: redis}           #  5 India / 26
+  - {name: FalconX,        ats: greenhouse,      token: falconx}         #  4 India / 14
+  - {name: Unacademy,      ats: smartrecruiters, token: unacademy}       #  3 India
+  - {name: Western Digital, ats: smartrecruiters, token: westerndigital} #  2 India / 100
+  - {name: Whatfix,        ats: smartrecruiters, token: whatfix}         #  1 India
+  #  Live boards with no India role open on 2026-08-06. Kept: a board that
+  #  exists costs one request a run and starts paying the day they post.
+  - {name: Navi,           ats: ashby,      token: navi}   # 7 open. Supersedes the
+  #    "Navi (TurboHire — unprobed API, possible future crack)" note below:
+  #    they are on Ashby, and no TurboHire work is needed.
+  - {name: Porter,         ats: lever,      token: porter}         # 25 open
+  - {name: Pine Labs,      ats: greenhouse, token: pine}           #  2 open
+  - {name: FICO,           ats: smartrecruiters, token: ficocareers}
+  #  …and the Workday half of the same list. Sweeping (tenant × wdN × site)
+  #  is the only way in — the myworkdayjobs root 406s for EVERY hostname,
+  #  including nonsense ones, so it carries no liveness signal to narrow with.
+  #  Micron was included as a control and re-found, which is what says the
+  #  sweep works and the misses below are real.
+  - {name: Intel,   ats: workday, host: intel.wd1.myworkdayjobs.com,  tenant: intel,  site: External}            # 75 open, 20 India pg1
+  - {name: HP,      ats: workday, host: hp.wd5.myworkdayjobs.com,     tenant: hp,     site: ExternalCareerSite}  # 88 open, 16 India pg1
+  - {name: Red Hat, ats: workday, host: redhat.wd5.myworkdayjobs.com, tenant: redhat, site: jobs}                #  6 open
+  # ── Aug-06 2026 (round 2): tier-1 portals, found by FINGERPRINTING ──
+  #  The round-1 "no free board" verdict above was reached by probing five ATS
+  #  APIs and giving up — which only ever asked "do they use an ATS I already
+  #  support?". The right question is "what is their careers page built on?".
+  #  Fetching each careers page and reading the platform's tell out of the
+  #  final URL + HTML answered it in one pass, and seven tier-1 names fell out
+  #  needing NO new adapter — they run on Oracle HCM and Workday, both of which
+  #  ats.py already speaks (Oracle was written for JPMorgan).
+  #  The coordinates below are read from the page, never guessed: Oracle needs
+  #  (host, siteNumber) and Workday needs (tenant, site), and every one of them
+  #  is a company-specific string no slug sweep would have produced
+  #  (fa-extu-saasfaprod1…, egug…, ibqbjb…, panwexternalcareers, LWS_External_CS).
+  - {name: American Express, ats: oracle, host: egug.fa.us2.oraclecloud.com,                site: CX_1}      # 9 India in first 25
+  - {name: Honeywell,        ats: oracle, host: ibqbjb.fa.ocs.oraclecloud.com,              site: CX_1}      # 10 India in first 25
+  - {name: Oracle,           ats: oracle, host: eeho.fa.us2.oraclecloud.com,                site: CX_45001}  # 9 India in first 25
+  - {name: Akamai,           ats: oracle, host: fa-extu-saasfaprod1.fa.ocs.oraclecloud.com, site: CX_1}      # 4 India in first 25
+  - {name: Dell,             ats: oracle, host: enterpriseplatform.dell.com,                site: CX_1}      # 3 India in first 25
+  - {name: Palo Alto Networks, ats: workday, host: paloaltonetworks.wd5.myworkdayjobs.com, tenant: paloaltonetworks, site: panwexternalcareers}  # 154 open, 20 India pg1
+  - {name: Lowe's,             ats: workday, host: lowes.wd5.myworkdayjobs.com,             tenant: lowes,            site: LWS_External_CS}      # 188 open, 9 India pg1
+  #  Found by mining the careers page's own JS bundles for endpoint strings —
+  #  a plain GET, no browser permission needed. thoughtspot.com/api/
+  #  getCareersListing returned job URLs pointing at ats.rippling.com, which
+  #  named the platform outright. No new adapter: rippling was already here for
+  #  Aerospike. Worth repeating on any site whose HTML looks empty.
+  - {name: ThoughtSpot, ats: rippling, token: thoughtspot}   # 52 open, 8 India
+  #  Same fingerprint pass, round 3. BrowserStack is the standout: India HQ, so
+  #  every role is an India role, and it was already on profile.yaml's
+  #  referral_companies with no board behind it until now.
+  - {name: BrowserStack, ats: workday, host: browserstack.wd3.myworkdayjobs.com, tenant: browserstack, site: External}  # 36 open, 36 India
+  - {name: Gojek,        ats: lever,   token: GoToGroup}     # 48 open, 1 India (GoTo Group)
+  #  Hardware/silicon firms are IN, deliberately — they run big India SOFTWARE
+  #  teams, and filters.yaml already drops the silicon roles by title
+  #  (`hardware`, `embedded`, `firmware`), so the company costs nothing to add
+  #  and the filter keeps only what fits.
+  #  Qualcomm IS on Eightfold (qualcomm.eightfold.ai) but answers 403 to a
+  #  scripted GET — bot protection, not an empty board. Retry through Chrome.
+  #  AMD and ARM are on iCIMS (careers-amd, experienced-arm); Marvell 403s;
+  #  Synopsys and Broadcom expose nothing static.
+
+  # ── Aug-06 2026: the Phenom applyUrl trick ───────────────────
+  #  Cisco/ABB/Philips/Roche all run Phenom People career sites, whose
+  #  POST /widgets search API is public and works server-side (Cisco: 201 India
+  #  hits). But do NOT write a Phenom adapter for them — Phenom is only a
+  #  front-end. Every job it returns carries an `applyUrl` pointing at the REAL
+  #  ATS underneath, and for all four that is Workday:
+  #      Cisco   → cisco.wd5   / Cisco_Careers
+  #      ABB     → abb.wd3     / External_Career_Page
+  #      Philips → philips.wd3 / jobs-and-careers
+  #      Roche   → roche.wd3   / roche-ext
+  #  Going to Workday directly gets full JDs (Phenom only returns a teaser,
+  #  which would trip the fail-open experience gate) and reuses the adapter we
+  #  already have. None of these site names is guessable — a 6,000-combo
+  #  Workday sweep missed every one. Phenom handed them over for free.
+  #  GENERAL RULE: when a careers site is a known front-end, read its applyUrl
+  #  before writing an adapter for it.
+  - {name: Cisco,   ats: workday, host: cisco.wd5.myworkdayjobs.com,   tenant: cisco,   site: Cisco_Careers}         # 260 open, 20 match
+  - {name: ABB,     ats: workday, host: abb.wd3.myworkdayjobs.com,     tenant: abb,     site: External_Career_Page}   # 190 fetched, 54 match
+  - {name: Philips, ats: workday, host: philips.wd3.myworkdayjobs.com, tenant: philips, site: jobs-and-careers}       # 104 fetched, 17 match
+  - {name: Roche,   ats: workday, host: roche.wd3.myworkdayjobs.com,   tenant: roche,   site: roche-ext}              #  61 fetched,  1 match
+
+  # ── Aug-07 2026: Workday sweep, 2nd generation ───────────────
+  #  The first sweep used a generic site list (External, EXT, Careers…) and
+  #  missed every board below. The real names are company-specific but
+  #  FORMULAIC once you've seen a few — Cisco_Careers, External_Career_Page,
+  #  roche-ext, GEHC_ExternalSite, DanaherJobs, LWS_External_CS. So generate
+  #  `{Name}Careers` / `{Name}_Careers` / `{tenant}-ext` from the company name
+  #  instead of guessing generics. That one change found 12 boards in a sweep
+  #  the generic list had drawn a blank on.
+  #  Only boards that produce a role clearing the heuristic floor are kept —
+  #  every one below was fetched through the production adapter and scored
+  #  first. Pharma/industrial are here because they run real India digital
+  #  teams; the title filters drop the lab and field-service roles by
+  #  themselves, so a low-yield board costs one request a run and nothing else.
+  - {name: Amgen,       ats: workday, host: amgen.wd1.myworkdayjobs.com,       tenant: amgen,       site: Careers}            # 55 match, 9 pass — "Full Stack Software Engineer"
+  - {name: Stryker,     ats: workday, host: stryker.wd1.myworkdayjobs.com,     tenant: stryker,     site: StrykerCareers}     # 7 match, 7 pass
+  - {name: Medtronic,   ats: workday, host: medtronic.wd1.myworkdayjobs.com,   tenant: medtronic,   site: MedtronicCareers}   # 7 match, 2 pass
+  - {name: Abbott,      ats: workday, host: abbott.wd5.myworkdayjobs.com,      tenant: abbott,      site: AbbottCareers}      # 3 match, 2 pass
+  - {name: Shell,       ats: workday, host: shell.wd3.myworkdayjobs.com,       tenant: shell,       site: ShellCareers}       # 5 match, 2 pass
+  - {name: AstraZeneca, ats: workday, host: astrazeneca.wd3.myworkdayjobs.com, tenant: astrazeneca, site: Careers}            # 2 match, 1 pass
+  - {name: Sanofi,      ats: workday, host: sanofi.wd3.myworkdayjobs.com,      tenant: sanofi,      site: SanofiCareers}      # 3 match, 1 pass
+  - {name: Danaher,     ats: workday, host: danaher.wd1.myworkdayjobs.com,     tenant: danaher,     site: DanaherJobs}        # 2 match, 1 pass
+  #  Live Workday boards found by the same sweep but NOT added — fetched and
+  #  scored, and zero roles cleared the floor. Coordinates recorded so the next
+  #  sweep doesn't spend itself rediscovering them; re-check occasionally
+  #  rather than re-probing from scratch:
+  #    Pfizer        pfizer.wd1       / PfizerCareers      (0 match)
+  #    Novartis      novartis.wd3     / Novartis_Careers   (1 match, 0 pass)
+  #    Fidelity      fmr.wd1          / FidelityCareers    (0 match)
+  #    Marvell       marvell.wd1      / MarvellCareers     (5 match, 0 pass)
+  #    GE Healthcare gehc.wd5         / GEHC_ExternalSite  (0 match)
+  #    DuPont        dupont.wd5       / jobs               (1 job on the board)
+
+  # ── Aug-07 2026: Workday sweep gen-3, India GCCs ─────────────
+  #  90 companies, 20,574 combinations, Cisco carried as a CONTROL — it was
+  #  re-found, which is what makes the misses trustworthy. Always include a
+  #  known-good tenant in a sweep; without one, "no hits" is unfalsifiable.
+  #  ⚠️ Workday site names are CASE-SENSITIVE. Maersk returns 0 India roles on
+  #  `Maersk_Careers` and 19 on `maersk_careers` — gen-2 wrote it off as empty
+  #  on exactly that basis. Generate both casings.
+  #  Every board below was fetched through the production adapter and scored;
+  #  all 11 produce at least one role clearing the heuristic floor.
+  - {name: NXP,           ats: workday, host: nxp.wd3.myworkdayjobs.com,          tenant: nxp,          site: Careers}              # 22 match, 11 pass — "AI & BI Enablement"
+  - {name: Agilent,       ats: workday, host: agilent.wd5.myworkdayjobs.com,      tenant: agilent,      site: Agilent_Careers}      # 18 match, 11 pass
+  - {name: Thermo Fisher, ats: workday, host: thermofisher.wd5.myworkdayjobs.com, tenant: thermofisher, site: ThermoFisherCareers}  #  7 match,  4 pass — "Engineer I, Software" scored 90
+  - {name: Cigna,         ats: workday, host: cigna.wd5.myworkdayjobs.com,        tenant: cigna,        site: CignaCareers}         #  7 match,  4 pass
+  - {name: Dow,           ats: workday, host: dow.wd1.myworkdayjobs.com,          tenant: dow,          site: ExternalCareers}      #  3 match,  3 pass — "Full Stack Developer (.Net/Angular/Azure)"
+  - {name: Comcast,       ats: workday, host: comcast.wd5.myworkdayjobs.com,      tenant: comcast,      site: Comcast_Careers}      # 13 match,  2 pass
+  - {name: Aptiv,         ats: workday, host: aptiv.wd5.myworkdayjobs.com,        tenant: aptiv,        site: Aptiv_Careers}        # 22 match,  2 pass
+  - {name: Carrier,       ats: workday, host: carrier.wd5.myworkdayjobs.com,      tenant: carrier,      site: jobs}                 #  6 match,  2 pass
+  - {name: Maersk,        ats: workday, host: maersk.wd3.myworkdayjobs.com,       tenant: maersk,       site: maersk_careers}       #  2 match,  1 pass (see casing note above)
+  - {name: LSEG,          ats: workday, host: lseg.wd3.myworkdayjobs.com,         tenant: lseg,         site: Careers}              #  1 match,  1 pass — "Data scientist" scored 85
+  - {name: Kimberly-Clark, ats: workday, host: kimberlyclark.wd1.myworkdayjobs.com, tenant: kimberlyclark, site: Global}            #  1 match,  1 pass
+
+  # ── Aug-07 2026: Eightfold PCSX (`pcsx` adapter, new) ────────
+  #  Qualcomm was written off TWICE as "Eightfold signature is a CDN reference,
+  #  not a board" because the classic /api/apply/v2/jobs LIST endpoint answers
+  #  403 to any scripted GET. Watching the page's own requests in Chrome showed
+  #  it calling `/api/pcsx/search` instead — which answers 200 server-side, no
+  #  browser needed. 549 India engineering roles sat behind that path difference.
+  #  Note `host` and `domain` differ, hence two fields rather than a token.
+  #  A bare GET returns 422 naming the missing field — this API tells you what
+  #  it wants; read the 422 instead of guessing.
+  #  Micron is also on PCSX (246 India) but is NOT added here: it is already
+  #  polled via Workday, and a second source for the same role would key
+  #  differently in seen_jobs and double-count.
+  # ── Aug-07 2026: Google (`google` adapter, new) ──────────────
+  #  Google Careers makes NO job XHR at all — watching the page in Chrome showed
+  #  zero API calls, because the results are rendered server-side. So a plain
+  #  GET gets everything and this runs in CI like any other board; no browser,
+  #  no key, no aggregator.
+  #  ⚠️ One trap produced a confident, wrong "0 jobs found": the page sets
+  #  `<base href>`, so every job link in the markup is RELATIVE
+  #  (`jobs/results/123-slug`). A regex anchored on the absolute path matches
+  #  nothing while the jobs sit right there in the HTML.
+  #  The qualification bullets ship on the RESULTS page, so the experience gate
+  #  reads real requirements with no second fetch (yrs=8/5/2, not None).
+  #  Google India skews senior (many 5-8 yr reqs, correctly dropped by
+  #  hard_drop_years), but the early-career and full-stack roles land.
+  - {name: Google, ats: google}   # 136 fetched, 30 match, 22 pass — "Software Engineer, Full Stack, Cloud" 80 @ 2 yrs
+
+  # ── Aug-07 2026: Indian-company sweep ────────────────────────
+  #  73 Indian product companies fingerprinted. The finding that matters for
+  #  next time: Indian startups do NOT live on Greenhouse/Lever/Ashby (that
+  #  well was already known to be dry) — they cluster on Indian HR suites.
+  #  Observed distribution: Darwinbox 10, Keka 5, Freshteam 4, TurboHire (Ola),
+  #  Zoho Recruit (Zoho), SuccessFactors (PayU), Workday 2.
+  #  Keka boards below have India roles but ZERO engineering openings matching
+  #  today. Added anyway — unlike the pharma boards we skipped, these are
+  #  structurally right (Indian fintech/SaaS, India-based eng) and simply have
+  #  nothing open this week. One request per run each.
+  - {name: Fractal, ats: workday, host: fractal.wd1.myworkdayjobs.com, tenant: fractal, site: Careers}   # 92 fetched, 3 match, 2 pass — "Kafka Engineer"
+  - {name: Signzy,  ats: keka, token: "signzy/54e30b3d-e138-4862-8055-8b2ce8c31009"}   # 37 jobs, 24 India, 0 eng today
+  - {name: Zluri,   ats: keka, token: "zluri/ed2b6b25-be74-43f1-9a38-c3bf27b9146c"}    #  9 jobs,  5 India
+  - {name: Niyo,    ats: keka, token: "niyo/52b9e3a9-ea8d-41a7-9b28-8375ab447ed4"}     #  9 jobs,  9 India
+  #  Cars24's Keka tenant RE-CONFIRMED as the UAE ops board (6 jobs, all Abu
+  #  Dhabi/Dubai) — the Jul-16 removal note was right, do not re-add it.
+  #  Uniphore (uniphore.wd503/Uniphore) is live but only 5 jobs, 0 match.
+  #  ── Darwinbox: CRACKED Aug-08 2026, and the cluster is a DUD ──
+  #  The API is fully public: /ms/candidateapi/job?page=N, no auth, no Turnstile
+  #  (the Turnstile guards the LOGIN page, which we never need). Multi-entity
+  #  tenants need &companyId=<id>, read off the real careers URL; `main` is a
+  #  valid explicit value and the param must be PRESENT even then.
+  #  But the yield is the point, and it was measured before shipping: across all
+  #  nine tenants the whole cluster carries TWO engineering roles, both SDE
+  #  II/III at 3-9 yrs — above the target seniority ceiling. Everything else is sales, ops,
+  #  counselling and store staff. These companies run Darwinbox for HR and post
+  #  engineering somewhere else. Last session called this "the single biggest
+  #  Indian prize" on fingerprint COUNTS; job counts say otherwise.
+  #  Kept because each board is one cheap request and boards do fluctuate —
+  #  but do not expect volume, and do not re-litigate this cluster.
+  - {name: PhysicsWallah, ats: darwinbox, token: "pwhr:a62d7a6e288992"}   # 122 jobs, 2 eng (SDE II/III, too senior)
+  - {name: Licious,       ats: darwinbox, token: "licious"}     #  4 jobs, 0 eng
+  - {name: Perfios,       ats: darwinbox, token: "perfios"}     #  4 jobs, 0 eng
+  - {name: Spinny,        ats: darwinbox, token: "spinzone"}    #  2 jobs, 0 eng
+  - {name: CleverTap,     ats: darwinbox, token: "clevertap"}   #  0 jobs today
+  - {name: HealthifyMe,   ats: darwinbox, token: "healthify"}   #  0 jobs today
+  - {name: Mad Street Den, ats: darwinbox, token: "msd"}        #  0 jobs today
+  - {name: upGrad,        ats: darwinbox, token: "upgrad:main"} #  0 jobs today
+  #  ── Freshteam: CRACKED Aug-08 2026, and this one pays ──
+  #  {tenant}.freshteam.com/jobs is server-rendered — no API needed, and the
+  #  admin /api/job_postings 401s so don't chase it.
+  #  WARNING for anyone adding tenants: Freshteam portals are TEMPLATED and
+  #  tenants pick different ones. Three shapes across nine boards, and a parser
+  #  written against one returns ZERO on another while the board is visibly
+  #  full — a silent empty, not an error. ats.freshteam() keys off the
+  #  /jobs/{id}/{slug} href that all three share. Always assert a new tenant
+  #  returns jobs WITH locations: a blank location is dropped by loc_ok().
+  #  Ninjacart is here rather than on Darwinbox — genuinely different boards
+  #  (23 jobs vs 6), and one company on two boards double-counts.
+  - {name: Haptik,    ats: freshteam, token: haptik}    # 16 jobs, 5 eng — "Software Engineer Backend" 2 yrs PASSES
+  - {name: Ninjacart, ats: freshteam, token: ninjacart} # 23 jobs, 0 eng today
+  - {name: Zolve,     ats: freshteam, token: zolve}     # 19 jobs, 0 eng today
+  - {name: Locus,     ats: freshteam, token: locus}     # 14 jobs, 5 eng (SDE-3/Staff — senior, but the board turns over)
+  - {name: Zetwerk,   ats: freshteam, token: zetwerk}   #  5 jobs
+  - {name: smallcase, ats: freshteam, token: smallcase} #  3 jobs, all eng — "Data Engineer I", "SDET II"
+  - {name: BharatPe,  ats: freshteam, token: bharatpe}  #  3 jobs
+  - {name: SpotDraft, ats: freshteam, token: spotdraft} #  3 jobs — "Data Scientist"
+  #  ── Indian platforms still not cracked ──
+  #  TurboHire: Ola (olacareers).  Zoho Recruit: Zoho.  SuccessFactors: PayU.
+
+  #  ── Tier-1 sweep, Aug-08 2026: added on MEASURED fit, not on name ──
+  #  the rule, and it is the right one: a board earns its place by
+  #  producing roles HE can get at 18L+, not by adding to the board count.
+  #  Evidence for that rule, from state/: the top supply is Bosch 325 / Amazon
+  #  293 / JPMorgan 148 / Mastercard 133 in 90 days, with the best scores (85-90)
+  #  also at Google/Amazon/JPMC/Amex — while slice, Groww, Navi, Porter, Pine
+  #  Labs, Whatfix, Signzy, Zluri, Niyo and Fi Money produced ZERO between them.
+  #  Big India engineering centres give volume AND quality; seed-stage Indian
+  #  startups give neither. Prefer the former.
+  #  MICROSOFT is the headline: its Eightfold instance lives on
+  #  apply.careers.microsoft.com and answers /api/pcsx/search — the existing
+  #  adapter, no new code. The old "Microsoft Eightfold = CDN reference, not a
+  #  board" note was right only about /api/apply/v2/jobs ("Not authorized for
+  #  PCSX") and wrong overall. Same lesson as Qualcomm: probe the pcsx path.
+  - {name: Microsoft, ats: pcsx, host: apply.careers.microsoft.com, domain: microsoft.com}   # 61 fetched, 8 match — "Software Engineer II" Bangalore, "Apps Full Stack Engineer"
+  - {name: Barclays, ats: workday, host: barclays.wd3.myworkdayjobs.com, tenant: barclays, site: External_Career_Site_Barclays}   # 23 India, 3 match — "Full Stack Engineer", fintech = his bonus sector
+  - {name: F5, ats: workday, host: ffive.wd5.myworkdayjobs.com, tenant: ffive, site: f5jobs}   # 17 India, 3 match — "Software Development Engineer II"
+  - {name: Atlassian, ats: atlassian}   # 232 jobs, 22 India, 13 eng — but ALL Principal/Senior/Head today, 0 at his level. Cheap, and the board turns over.
+  #  ── iCIMS / Jibe "CSX" front end — token is the careers HOST, not a tenant ──
+  #  https://{host}/api/jobs returns JSON with description+responsibilities+
+  #  qualifications INLINE (no detail fetch). The *.icims.com hostnames these
+  #  fingerprint as are the apply-side back end; polling them just bounces you
+  #  back with a window.top.location redirect. `location=India` is a REAL filter
+  #  (AMD 1064 → 203, nonsense location → 0) and only `limit` widens a page.
+  - {name: Schneider Electric, ats: icims, token: careers.se.com}   # 506 India; 18 clear the gate but only 2 are software — kept for "Software Engineer II - Full Stack Development" Bangalore. The mech/electrical rest auto-demote to B-tier (see below).
+  - {name: Booking.com, ats: icims, token: jobs.booking.com}        # 28 India, small but clean — "Full Stack Engineer 1" Bangalore
+  #  AMD (careers.amd.com) REJECTED — 203 India roles, 16 clear the gate, and
+  #  ZERO are software: DFT/post-silicon/RTL/SoC validation end to end. Hyderabad
+  #  and Bangalore are silicon design centres. Same trap as Samsung and Intel.
+  #  Why the mechanical/electrical noise on Schneider is tolerable and does NOT
+  #  need new title_exclude rules: measured on the live cockpit, only 5 of 168
+  #  rows are non-software engineering and every one scored 50-65, i.e. the
+  #  Gemini fit-gate already demotes them to B-tier bulk. The cost is bulk-list
+  #  clutter, not A-tier pollution. Do not add broad title bans for this.
+  #  REJECTED in the same sweep, after measuring — do not re-add without checking:
+  #    Samsung (sec.wd3/Samsung_Careers) — 28 India roles, 17 "match", and every
+  #      one is silicon: SOC/RTL/SRAM/physical-design/STA. Bangalore SSIR is a
+  #      semiconductor centre, not a software one. Pure noise. Same trap as Intel.
+  #    Texas Instruments (oracle edbz.fa.us2) — 58 India, 32 "match", but mostly
+  #      validation/RTL/analog. A few generic "Software Engineer" reqs are not
+  #      worth 149 fetched roles of silicon noise.
+  #    Sabre (sabre.wd1/SabreJobs) — 50 India roles, ZERO matching titles.
+  #    Wipro/Infosys/TCS/Accenture/Cognizant — deliberately NOT added. Services
+  #      firms sit far below the 18L bar and would flood the cockpit.
+  #  ── Quant funds / HFT, Aug-08 2026 — the best fit-per-role on the whole list ──
+  #  the ask: recognisable tier-1 names where a referral actually converts,
+  #  paying well above the 18L bar. Quant funds are exactly that and had been
+  #  missed entirely — they are finance (his stated bonus sector), their India
+  #  desks are Bangalore/Bengaluru, and they hire at 0-3 yrs.
+  - {name: Point72,    ats: greenhouse, token: point72}   # 231 jobs, 37 India, 18 match, 10 CLEAR THE GATE — "Software Engineer, Technology" 2yrs, "…Equities Middle Office", "…Macro Middle Office" Bengaluru
+  - {name: Millennium, ats: eightfold, token: mlp}        # 55 jobs, ALL India, 22 match, 5 clear — "Quantitative Developer (Python)" 2yrs, "Angular Developer", "Full Stack Software Engineer" Bangalore
+  #  Checked and skipped — real greenhouse boards, but ZERO India roles:
+  #    Hudson River Trading (hrttalentcommunity, 3 jobs), Jump Trading (talent,
+  #    2 jobs), XTX Markets (xtxmarketstechnologies, 7 jobs). Their India desks
+  #    do not post publicly. Do not re-probe these three.
+  #  Still unresolved (no ATS signature on the careers page, need a browser):
+  #    DE Shaw (big Hyderabad/Bangalore presence — highest-value of these),
+  #    Optiver, IMC, Squarepoint, WorldQuant, Graviton, Quadeye, AlphaGrep,
+  #    Jane Street, Two Sigma, DRW, Citadel (403), Balyasny, Akuna.
+  - {name: Qualcomm, ats: pcsx, host: careers.qualcomm.com, domain: qualcomm.com}   # 105 fetched, 13 match, 9 pass
+  - {name: Ericsson, ats: pcsx, host: jobs.ericsson.com,    domain: ericsson.com}   # 54 fetched, 20 match, 10 pass — "Software Backend Developer Java Spring Boot" 83
+  #  Checked and genuinely closed to us — the careers page runs on a platform
+  #  with no public JSON, or the board is auth-walled:
+  #    Cisco, Lowe's-content + Philips → Phenom People (content API only)
+  #    Intuit → Radancy;  SAP → SuccessFactors;  Schneider → iCIMS/Taleo/BrassRing
+  #    Flipkart → TurboHire (bearer token held by the SPA)
+  #    Eightfold signatures on Qualcomm/Microsoft/Nutanix/Amex are CDN
+  #      references, NOT boards — every /api/apply/v2/jobs probe returned empty.
+  #  Still unfingerprinted, need the browser's network tab: Google, Meta,
+  #  Atlassian, Walmart, Goldman Sachs, IBM, ThoughtSpot, Dynatrace, Zepto,
+  #  Dream11, Myntra, ShareChat, Games24x7, Cashfree, Smallcase, ClearTax,
+  #  MPL, Krutrim, HyperVerge, Zoho, Tesco, Siemens, GE Healthcare, Shell.
 
 # ─────────────────────────────────────────────────────────────
 #  PHASE 2b — slug hunt completed Jul 2026. Resolved: Expedia +

@@ -6,7 +6,13 @@ name: job-finder
 # own fork and added the repo secrets.
 on:
   # schedule:
-  #   - cron: "0,30 * * * *"   # every 30 min (UTC). Jobs rarely need faster.
+  #   # Was "0,30 * * * *". That asked for 48 runs a day and GitHub delivered
+  #   # 8-21 (median gap 97 min, measured over a week) — the extra ticks were
+  #   # never real, they just made the cadence unpredictable and re-fetched 27k
+  #   # postings across 212 boards for nothing. Hourly is what actually happens,
+  #   # said out loud. It costs no supply: a role posted at 09:05 is found at
+  #   # 10:00 either way, and you work the cockpit once or twice a day.
+  #   - cron: "0 * * * *"
   workflow_dispatch:            # lets you trigger a run by hand from the Actions tab
     inputs:
       test_slack:
@@ -25,13 +31,29 @@ on:
 permissions:
   contents: write               # to commit the updated seen_jobs.json back
 
+# cancel-in-progress used to be false, to protect the state write from being
+# killed mid-flight. That cost a 23-hour Slack blackout on 2026-07-25: one run
+# sat in `queued` for 23h without ever being assigned a runner, and because a
+# waiting run holds the group, every scheduled run behind it was cancelled in
+# turn. Nothing polled, so not even the heartbeat fired — a silent stall.
+# True is the self-healing choice here: a poll takes ~1 min and the cron is 30
+# min apart, so a run still alive when the next one starts is hung by
+# definition and worth killing. Worst case we lose one state write and a few
+# roles get re-alerted once — far cheaper than a day of silence.
 concurrency:
   group: job-finder
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   poll:
     runs-on: ubuntu-latest
+    # Belt to the concurrency braces: caps a hung *running* job. (It does not
+    # apply while a job is queued — that case is what cancel-in-progress covers.)
+    # 20 → 30: a --golive scores every open match, and the 2026-08-09 sweep took
+    # 15m37s for 707 roles before outreach drafts. A normal poll is ~1 min, so
+    # this only ever binds on a full sweep — and a sweep killed after Slack but
+    # before the state write re-alerts the whole batch on the next run.
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 
@@ -82,7 +104,14 @@ jobs:
         run: |
           git config user.name  "job-finder-bot"
           git config user.email "actions@github.com"
-          git add state/seen_jobs.json state/outreach.json
+          # board_health.json has to survive the run too: it counts how many runs
+          # in a row a board has failed, and the Slack alert only fires on the
+          # third. Left uncommitted, the runner's copy is discarded, the count
+          # resets to 1 every run, and the alert never fires at all — which is
+          # precisely the silence that let Tekion 404 for days.
+          # Whole directory rather than a file list, so a run that hasn't written
+          # board_health.json yet can't fail the step on an unmatched pathspec.
+          git add state/
           if git diff --cached --quiet; then
             echo "No state change."
             exit 0
@@ -102,3 +131,37 @@ jobs:
           done
           echo "::error::Could not push state after 3 attempts."
           exit 1
+
+      # ── Dead-man's switch ────────────────────────────────────────
+      # A dead poller and a quiet job market look identical from your phone:
+      # Slack silence. That already cost a 24h blackout on 2026-07-25, when a run
+      # stuck in `queued` held the concurrency group — and nothing inside this
+      # workflow can ever catch that, because the detector would have to run.
+      #
+      # So a successful poll stamps a heartbeat on his always-on Oracle VM, which
+      # alerts by Bark push when the stamps stop. The direction is deliberate:
+      # having the VM poll the GitHub API instead would need a token, and
+      # fine-grained tokens expire silently — a watchdog that dies with its own
+      # credential is the exact failure it exists to prevent. The SSH key here is
+      # locked to a forced `touch` on the VM and can do nothing else.
+      #
+      # `continue-on-error` + `|| true`: the watchdog must never be able to fail
+      # a poll that otherwise worked. A VM problem is not a job-finder problem.
+      - name: Stamp watchdog heartbeat
+        if: ${{ !inputs.test_slack && !inputs.backlog }}
+        continue-on-error: true
+        env:
+          KEY:  ${{ secrets.WATCHDOG_SSH_KEY }}
+          HOST: ${{ secrets.WATCHDOG_HOST }}
+        run: |
+          if [ -z "$KEY" ] || [ -z "$HOST" ]; then
+            echo "No watchdog secrets configured — skipping heartbeat."
+            exit 0
+          fi
+          install -m 600 /dev/null /tmp/wd_key
+          printf '%s\n' "$KEY" > /tmp/wd_key
+          ssh -i /tmp/wd_key -o BatchMode=yes -o StrictHostKeyChecking=no \
+              -o ConnectTimeout=20 "$HOST" true \
+            && echo "Watchdog heartbeat stamped." \
+            || echo "::warning::Could not reach the watchdog VM — heartbeat not stamped."
+          rm -f /tmp/wd_key

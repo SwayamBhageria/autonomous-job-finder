@@ -12,6 +12,11 @@ surfaces as "follow-up due" and floats up — the reminder nobody sends by hand,
 and the reason follow-ups lift replies 15-72%. B-tier roles are apply-and-track
 only (no referral hunt — that effort is reserved for the high-fit tier).
 
+Every row also has "✕ Not a fit" — the escape hatch for a role you're never going
+to apply for (asks for 5 years, wrong stack, wrong city). Without it the only way
+off the list was to tick "applied", which corrupts the one number worth trusting.
+Dismissals are a toggle: switch the filter to Everything to undo one.
+
 All progress persists in the page's localStorage, keyed to the file path, so it
 survives regeneration and reboots as long as you open it the same way (the
 `outreach` command always does). Written by `poller.py --outreach`.
@@ -28,13 +33,13 @@ def _mailto(subject: str, body: str) -> str:
 
 _CSS = """
 :root{--bg:#fff;--fg:#16181d;--mut:#6b7280;--line:#e5e7eb;--card:#fff;--accent:#2563eb;
-  --a:#047857;--b:#b45309;--new:#2563eb;--due:#b45309;--done:#059669;--chip:#f3f4f6}
+  --a:#047857;--b:#b45309;--new:#2563eb;--due:#b45309;--done:#059669;--chip:#f3f4f6;--gone:#b91c1c}
 @media (prefers-color-scheme:dark){:root{--bg:#0d0f14;--fg:#e8eaed;--mut:#9aa1ac;--line:#242832;
-  --card:#141821;--accent:#60a5fa;--a:#34d399;--b:#fbbf24;--new:#60a5fa;--due:#fbbf24;--done:#34d399;--chip:#1b2029}}
+  --card:#141821;--accent:#60a5fa;--a:#34d399;--b:#fbbf24;--new:#60a5fa;--due:#fbbf24;--done:#34d399;--chip:#1b2029;--gone:#b91c1c}}
 :root[data-theme=light]{--bg:#fff;--fg:#16181d;--mut:#6b7280;--line:#e5e7eb;--card:#fff;--accent:#2563eb;
-  --a:#047857;--b:#b45309;--new:#2563eb;--due:#b45309;--done:#059669;--chip:#f3f4f6}
+  --a:#047857;--b:#b45309;--new:#2563eb;--due:#b45309;--done:#059669;--chip:#f3f4f6;--gone:#b91c1c}
 :root[data-theme=dark]{--bg:#0d0f14;--fg:#e8eaed;--mut:#9aa1ac;--line:#242832;--card:#141821;
-  --accent:#60a5fa;--a:#34d399;--b:#fbbf24;--new:#60a5fa;--due:#fbbf24;--done:#34d399;--chip:#1b2029}
+  --accent:#60a5fa;--a:#34d399;--b:#fbbf24;--new:#60a5fa;--due:#fbbf24;--done:#34d399;--chip:#1b2029;--gone:#b91c1c}
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
 .wrap{max-width:940px;margin:0 auto;padding:26px 18px 90px}
@@ -45,10 +50,27 @@ h1{font-size:22px;margin:0 0 3px}
 .bar b{font-variant-numeric:tabular-nums}
 .pill{padding:2px 9px;border-radius:99px;background:var(--chip);color:var(--mut)}
 .pill.due{color:var(--due)}.pill.todo{color:var(--new)}
-.filter{margin-left:auto;display:flex;gap:6px}
+.filter{display:flex;gap:6px;flex-wrap:wrap}
 .filter button{padding:4px 10px;border:1px solid var(--line);background:var(--card);color:var(--mut);
-  border-radius:7px;cursor:pointer;font:inherit}
+  border-radius:7px;cursor:pointer;font:inherit;display:inline-flex;gap:6px;align-items:center}
 .filter button.on{color:var(--fg);border-color:var(--accent)}
+.filter button.zero{opacity:.4}
+.filter button i{font-style:normal;font-variant-numeric:tabular-nums;font-size:11.5px;
+  background:var(--chip);color:var(--mut);border-radius:99px;padding:0 6px;min-width:18px;text-align:center}
+.filter button.on i{background:var(--accent);color:#fff}
+/* Tier is a second axis, not another view — it narrows whichever view is open,
+   so it reads as a segmented control rather than one more chip in the row. */
+.tiers{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden}
+.tiers button{padding:4px 11px;border:0;border-left:1px solid var(--line);background:var(--card);
+  color:var(--mut);cursor:pointer;font:inherit;display:inline-flex;gap:6px;align-items:center}
+.tiers button:first-child{border-left:0}
+.tiers button.on{color:#fff;background:var(--accent)}
+.tiers button i{font-style:normal;font-variant-numeric:tabular-nums;font-size:11.5px;
+  background:var(--chip);color:var(--mut);border-radius:99px;padding:0 6px;min-width:18px;text-align:center}
+.tiers button.on i{background:rgba(255,255,255,.24);color:#fff}
+.sortwrap{margin-left:auto;display:flex;align-items:center;gap:6px;color:var(--mut);font-size:12.5px}
+.sortwrap select{font:inherit;font-size:12.5px;padding:4px 8px;border:1px solid var(--line);
+  border-radius:7px;background:var(--card);color:var(--fg);cursor:pointer}
 h2{font-size:14px;margin:24px 0 10px;display:flex;align-items:center;gap:9px}
 .tag{font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;padding:2px 8px;border-radius:99px;border:1px solid currentColor}
 .tag.a{color:var(--a)}.tag.b{color:var(--b)}
@@ -91,7 +113,32 @@ h2{font-size:14px;margin:24px 0 10px;display:flex;align-items:center;gap:9px}
 .badge{font-size:11px;font-weight:700;padding:2px 9px;border-radius:99px;text-transform:uppercase;
   letter-spacing:.04em;background:var(--due);color:#fff;display:none}
 .when{font-size:12px;color:var(--mut);margin-left:2px}
+.links a.dead{color:var(--mut);cursor:pointer}
+.links a.dismiss{margin-left:auto;color:var(--mut);cursor:pointer}
+.links a.dismiss:hover{border-color:var(--mut);color:var(--fg)}
+.card.dismissed{opacity:.42}
+.card.dismissed .role a{text-decoration:line-through}
+.card.dismissed .why,.card.dismissed .email-hint,.card.dismissed .dm,.card.dismissed .track{display:none}
+.card.dismissed .links a:not(.dismiss){display:none}
 .empty{color:var(--mut);text-align:center;padding:44px 0}
+/* Liveness + age. The cockpit used to show a 3-week-old pulled requisition
+   exactly like a role posted this morning; these are the signals that tell
+   them apart before you spend a click. */
+.meta{display:flex;gap:7px;align-items:center;flex-wrap:wrap;margin-top:5px}
+.flag{font-size:11px;padding:1px 8px;border-radius:99px;background:var(--chip);color:var(--mut);white-space:nowrap}
+.flag.gone{background:var(--gone);color:#fff;font-weight:700}
+.flag.old{color:var(--due)}
+.flag.fresh{color:var(--done)}
+.card.gone{opacity:.5}
+.card.gone .role a{text-decoration:line-through}
+.card.gone .links a.apply{pointer-events:none;opacity:.4;border-color:var(--line);color:var(--mut)}
+.card.gone .dm,.card.gone .email-hint{display:none}
+.search{flex:1 1 190px;min-width:150px;font:inherit;font-size:12.5px;padding:5px 10px;
+  border:1px solid var(--line);border-radius:7px;background:var(--card);color:var(--fg)}
+.search:focus{outline:none;border-color:var(--accent)}
+.more{display:block;width:100%;margin:4px 0 8px;padding:9px;border:1px dashed var(--line);
+  background:none;color:var(--mut);border-radius:9px;cursor:pointer;font:inherit;font-size:12.5px}
+.more:hover{border-color:var(--accent);color:var(--fg)}
 """
 
 _JS = r"""
@@ -99,51 +146,137 @@ const K='jobcockpit.v2';
 const S=JSON.parse(localStorage.getItem(K)||'{}');   // key -> {applied, status, ts}
 const DAY=86400000, DUE=4;
 function save(){localStorage.setItem(K,JSON.stringify(S))}
-function st(k){const r=S[k]||{};return{applied:!!r.applied,status:r.status||'new',ts:r.ts||0}}
+function st(k){const r=S[k]||{};return{applied:!!r.applied,status:r.status||'new',ts:r.ts||0,
+  dismissed:!!r.dismissed}}
 function set(k,v){S[k]={...st(k),...v};save()}
 function dueFor(r){return r.status==='messaged'&&r.ts&&(Date.now()-r.ts)>=DUE*DAY}
 function ago(ts){if(!ts)return'';const d=Math.floor((Date.now()-ts)/DAY);
   return d<=0?'today':d===1?'1 day ago':d+' days ago'}
+// The posting itself is gone from the company's board — distinct from `status
+// ==='closed'`, which is you closing out a referral thread. You cannot apply to
+// a pulled requisition, so it never counts as outstanding work.
+function gone(c){return c.dataset.gone==='1'}
+// `closed` is the neutral way off the list, on either tier: the posting is dead,
+// broken, or otherwise not worth another click, without asserting it was a bad
+// match. That distinction matters — `dismissed` is the "not a fit" signal, and
+// mislabelling a dead link as a bad match would poison it as training data.
+function closed(r){return r.status==='closed'}
 function resolved(c,r){                    // "nothing left to do on this row"
+  if(r.dismissed)return true;              // not a fit — off the list, applied or not
+  if(gone(c))return true;                  // posting pulled; nothing to apply to
+  if(closed(r))return true;                // closed stands alone; you may never have applied
   if(c.dataset.tier==='B')return r.applied;
-  return r.applied&&(r.status==='replied'||r.status==='closed');
+  return r.applied&&r.status==='replied';
 }
 function needsAction(c,r){
+  if(r.dismissed||gone(c)||closed(r))return false;
   if(!r.applied)return true;               // still to apply
   if(c.dataset.tier==='B')return false;
-  if(r.status==='replied'||r.status==='closed')return false;
+  if(r.status==='replied')return false;
   return r.status==='new'||dueFor(r);      // applied but no referral ask, or follow-up due
 }
-let filter='action';
+// One predicate per view. "To do" is the daily driver; the rest exist so you can
+// actually answer "what have I applied to?" or "who owes me a reply?" — which the
+// old three-button bar (Needs action / All open / Everything) could not.
+const VIEWS=[
+  ['todo',     'To do',          (c,r)=>needsAction(c,r)],
+  // closed out excludes a row here for the same reason it does in `resolved`:
+  // the thread is finished, so it is not outstanding work you owe an application.
+  ['toapply',  'To apply',       (c,r)=>!r.applied&&!r.dismissed&&!gone(c)&&r.status!=='closed'],
+  ['applied',  'Applied',        (c,r)=>r.applied&&!r.dismissed],
+  ['messaged', 'Messaged',       (c,r)=>!r.dismissed&&(r.status==='messaged'||r.status==='followed_up')],
+  ['due',      'Follow-up due',  (c,r)=>!r.dismissed&&dueFor(r)],
+  ['replied',  'Replied',        (c,r)=>!r.dismissed&&r.status==='replied'],
+  ['closed',   'Closed',         (c,r)=>!r.dismissed&&r.status==='closed'],
+  ['gone',     'Posting gone',   (c)=>gone(c)],
+  ['nofit',    'Not a fit',      (c,r)=>r.dismissed],
+  ['open',     'Still open',     (c,r)=>!resolved(c,r)],
+  ['all',      'Everything',     ()=>true],
+];
+const VIEW=Object.fromEntries(VIEWS.map(([k,l,f])=>[k,f]));
+let filter='todo';
+// Tier narrows the open view rather than replacing it, so "how many A-tier roles
+// am I actually still owed?" is one click, not a count you do by eye down a page
+// where A and B rows are interleaved by section.
+let tierSel='all';
+function inTier(c){return tierSel==='all'||c.dataset.tier===tierSel}
+let sortBy='new';
+const SORTS={
+  new:  (a,b)=>b.seen-a.seen,          // default: matches how the page is generated
+  score:(a,b)=>b.score-a.score,
+  co:   (a,b)=>a.co.localeCompare(b.co)||b.score-a.score,
+};
+function resort(){
+  document.querySelectorAll('.sect').forEach(sec=>{
+    const cards=[...sec.querySelectorAll('.card')].map(c=>({el:c,
+      seen:+c.dataset.seen||0, score:+c.dataset.score||0, co:c.dataset.co||''}));
+    cards.sort(SORTS[sortBy]);
+    cards.forEach(x=>x.el.parentNode.appendChild(x.el));
+  });
+}
+// A day's work is a screen you can finish, not a scroll you abandon. Each
+// section renders a page at a time; the rest is one click away.
+const PAGE=20;
+let query='', limit={};
 function paint(){
-  let toApply=0,due=0,needRef=0;
+  const n={}; VIEWS.forEach(([k])=>n[k]=0);
+  const tn={all:0,A:0,B:0};
+  let needRef=0, applied=0, live=0;
   document.querySelectorAll('.card').forEach(c=>{
-    const k=c.dataset.k, r=st(k);
+    const k=c.dataset.k, r=st(k), off=r.dismissed;
     c.querySelector('.chk input').checked=r.applied;
     c.querySelectorAll('.step').forEach(b=>b.classList.toggle('on',b.dataset.s===r.status));
-    const isDue=dueFor(r);
+    const isDue=dueFor(r)&&!off;
     c.classList.toggle('due',isDue&&!r.applied?false:isDue);
     c.classList.toggle('done',resolved(c,r));
+    c.classList.toggle('dismissed',off);
+    c.classList.toggle('gone',gone(c));
     const badge=c.querySelector('.badge'); if(badge)badge.style.display=isDue?'inline-block':'none';
     const when=c.querySelector('.when');
     if(when)when.textContent=r.ts?(r.status==='messaged'?'messaged '+ago(r.ts):
       r.status==='followed_up'?'followed up '+ago(r.ts):''):'';
-    if(!r.applied)toApply++;
-    if(c.dataset.tier==='A'&&isDue)due++;
-    if(c.dataset.tier==='A'&&r.applied&&r.status==='new')needRef++;
-    let show=true;
-    if(filter==='action')show=needsAction(c,r);
-    else if(filter==='open')show=!resolved(c,r);
-    c.style.display=show?'':'none';
+    const dz=c.querySelector('.dismiss'); if(dz)dz.textContent=off?'↩︎ Undo dismiss':'✕ Not a fit';
+    const dd=c.querySelector('.dead');
+    if(dd)dd.textContent=closed(r)?'↩︎ Undo closed':'🚫 Gone / broken';
+    // Counts describe the whole list, deliberately ignoring the search box —
+    // a chip that changed as you typed would stop meaning anything. They do
+    // respect the tier tabs: each axis counts within the other's selection, so
+    // the two rows of numbers always add up to what is on screen.
+    const t=inTier(c);
+    VIEWS.forEach(([key,,fn])=>{if(t&&fn(c,r))n[key]++});
+    if(VIEW[filter](c,r)){tn.all++; tn[c.dataset.tier]=(tn[c.dataset.tier]||0)+1;}
+    if(c.dataset.tier==='A'&&!off&&r.applied&&r.status==='new')needRef++;
+    if(r.applied&&!off)applied++;
+    if(!off&&!gone(c))live++;
+    c.dataset.vis=(t&&VIEW[filter](c,r)&&(!query||c.dataset.q.includes(query)))?'1':'0';
   });
-  document.getElementById('c-apply').textContent=toApply;
-  document.getElementById('c-due').textContent=due;
+  VIEWS.forEach(([key])=>{
+    const b=document.querySelector(`.filter button[data-f="${key}"]`);
+    if(!b)return;
+    b.querySelector('i').textContent=n[key];
+    b.classList.toggle('zero',!n[key]);
+  });
+  document.querySelectorAll('.tiers button').forEach(b=>{
+    b.querySelector('i').textContent=tn[b.dataset.t]||0;
+    b.classList.toggle('on',b.dataset.t===tierSel);
+  });
   document.getElementById('c-ref').textContent=needRef;
+  document.getElementById('c-done').textContent=applied+'/'+live;
+  let anyShown=false;
   document.querySelectorAll('.sect').forEach(sec=>{
-    const any=[...sec.querySelectorAll('.card')].some(c=>c.style.display!=='none');
-    sec.style.display=any?'':'none';
+    const id=sec.dataset.sect, cap=limit[id]||PAGE;
+    let seen=0;
+    sec.querySelectorAll('.card').forEach(c=>{
+      const want=c.dataset.vis==='1';
+      if(want)seen++;
+      c.style.display=(want&&seen<=cap)?'':'none';
+    });
+    const btn=sec.querySelector('.more');
+    if(btn){btn.style.display=seen>cap?'':'none';
+      btn.textContent=`Show ${Math.min(PAGE,seen-cap)} more (${seen-cap} hidden)`;}
+    sec.style.display=seen?'':'none';
+    anyShown=anyShown||seen>0;
   });
-  const anyShown=[...document.querySelectorAll('.card')].some(c=>c.style.display!=='none');
   document.getElementById('empty').style.display=anyShown?'none':'block';
 }
 document.addEventListener('change',e=>{
@@ -151,6 +284,16 @@ document.addEventListener('change',e=>{
   if(box){const k=box.closest('.card').dataset.k; set(k,{applied:e.target.checked}); paint();}
 });
 document.addEventListener('click',e=>{
+  const more=e.target.closest('.more');
+  if(more){const id=more.closest('.sect').dataset.sect;
+    limit[id]=(limit[id]||PAGE)+PAGE; paint(); return;}
+  const dz=e.target.closest('.dismiss');
+  if(dz){e.preventDefault();
+    const k=dz.closest('.card').dataset.k; set(k,{dismissed:!st(k).dismissed}); paint();return;}
+  const dd=e.target.closest('.dead');
+  if(dd){e.preventDefault();               // same state the A-tier "Closed" chip writes
+    const k=dd.closest('.card').dataset.k, cur=st(k);
+    set(k,{status:closed(cur)?'new':'closed'}); paint();return;}
   const step=e.target.closest('.step');
   if(step){const k=step.closest('.card').dataset.k, s=step.dataset.s, cur=st(k);
     if(cur.status===s&&s!=='new'){set(k,{status:'new',ts:0});}
@@ -163,21 +306,75 @@ document.addEventListener('click',e=>{
       setTimeout(()=>cp.textContent='Copy',1400)});}
 });
 document.querySelectorAll('.filter button').forEach(b=>b.onclick=()=>{
-  filter=b.dataset.f; document.querySelectorAll('.filter button').forEach(x=>x.classList.toggle('on',x===b)); paint();});
+  filter=b.dataset.f; limit={};      // a new view starts at the top of its first page
+  document.querySelectorAll('.filter button').forEach(x=>x.classList.toggle('on',x===b)); paint();});
+document.querySelectorAll('.tiers button').forEach(b=>b.onclick=()=>{
+  tierSel=b.dataset.t; limit={}; paint();});   // paint() owns the .on class here
+const sel=document.getElementById('sort');
+if(sel)sel.onchange=()=>{sortBy=sel.value; resort(); paint();};
+const box=document.getElementById('q');
+if(box)box.oninput=()=>{query=box.value.trim().toLowerCase(); limit={}; paint();};
 paint();
 """
+
+
+def _age_days(job: dict) -> int:
+    seen = job.get("first_seen") or 0
+    return int((dt.datetime.now().timestamp() - seen) // 86400) if seen else 0
+
+
+def _flags(job: dict) -> str:
+    """The row's provenance, at a glance: how old, and can we still reach it.
+
+    A cockpit that shows a pulled requisition identically to this morning's
+    posting spends your clicks on 404s — 66 of the 97 verifiable rows on Aug 5
+    had a dead Apply link. Now the row says so before you click.
+    """
+    out = []
+    d = _age_days(job)
+    cls = "fresh" if d <= 1 else ("old" if d >= 7 else "")
+    out.append(f'<span class="flag {cls}">{"today" if d < 1 else f"{d}d old"}</span>')
+    if job.get("closed"):
+        out.append('<span class="flag gone">⚠️ Posting gone</span>')
+    elif job.get("reposted"):
+        out.append('<span class="flag">↻ relisted — link updated</span>')
+    elif job.get("verifiable") is False:
+        # aggregator listing: no board of ours to re-poll, so we can't confirm it
+        out.append('<span class="flag" title="Aggregator listing — we can\'t '
+                   're-check whether it is still open">link unverified</span>')
+    if job.get("min_years"):
+        out.append(f'<span class="flag">asks {job["min_years"]}+ yrs</span>')
+    return f'<div class="meta">{"".join(out)}</div>'
 
 
 def _card(job: dict) -> str:
     k = html.escape(job["key"])
     tier = job.get("tier", "A")
     resume = "🤖 AI" if job.get("resume") == "ai" else "💻 SWE"
+    # score/first_seen/company ride along so the sort control can reorder in-page
+    # without a regeneration; data-q is the search index, data-gone gates the
+    # views that would otherwise send you to a pulled requisition.
+    q = html.escape(f'{job.get("title","")} {job.get("company","")} '
+                    f'{job.get("location","")}'.lower())
+    data = (f'data-k="{k}" data-tier="{tier}" data-score="{int(job.get("score") or 0)}" '
+            f'data-seen="{int(job.get("first_seen") or 0)}" '
+            f'data-gone="{1 if job.get("closed") else 0}" data-q="{q}" '
+            f'data-co="{html.escape(job.get("company",""))}"')
     apply_link = f'<a class="apply" href="{html.escape(job.get("url","#"))}" target="_blank">Apply ↗</a>'
+    # Two escape hatches, and the difference between them is the point. "Not a
+    # fit" is a judgement on the role (too senior, wrong stack, wrong city) and
+    # is the only one safe to ever read back as a training signal. "Gone/broken"
+    # says nothing about fit — the link 404s or the req was pulled — so a dead
+    # posting never gets recorded as a bad match.
+    dead = '<a class="dead" title="Dead link or pulled posting — not a judgement '
+    dead += 'on fit">🚫 Gone / broken</a>'
+    dismiss = '<a class="dismiss">✕ Not a fit</a>'
     head = f"""<div class="head">
     <label class="chk"><input type="checkbox"><span>applied</span></label>
     <div class="main">
       <div class="role"><a href="{html.escape(job.get('url','#'))}" target="_blank">{html.escape(job['title'])}</a></div>
       <div class="co">{html.escape(job['company'])} · {html.escape((job.get('location') or '—'))} · {resume}</div>
+      {_flags(job)}
       <div class="why">{html.escape(job.get('reason',''))}</div>
     </div>
     <div style="text-align:right">
@@ -187,7 +384,8 @@ def _card(job: dict) -> str:
   </div>"""
     if tier != "A" or not job.get("referrers"):
         # B-tier (or an A-tier row that never got enriched): apply + track only.
-        return f'<div class="card" data-k="{k}" data-tier="{tier}">{head}<div class="links">{apply_link}</div></div>'
+        return (f'<div class="card" {data}>{head}'
+                f'<div class="links">{apply_link}{dead}{dismiss}</div></div>')
 
     links = [apply_link,
              f'<a href="{html.escape(job["referrers"])}" target="_blank">🔗 Find referrer</a>',
@@ -196,11 +394,13 @@ def _card(job: dict) -> str:
         links.append(f'<a href="{html.escape(job["excoll"])}" target="_blank">🏢 Ex-colleagues</a>')
     subject = job.get("email_subject") or f"Referral request — {job['title']} at {job['company']}"
     links.append(f'<a href="{html.escape(_mailto(subject, job.get("email_body") or ""))}">✉️ Email draft</a>')
+    links.append(dead)
+    links.append(dismiss)
     tag = "researched" if job.get("email_researched") else "guess — confirm the name on LinkedIn"
     steps = "".join(f'<span class="step" data-s="{s}">{lbl}</span>'
                     for s, lbl in [("messaged", "Messaged"), ("followed_up", "Followed up"),
                                    ("replied", "Replied"), ("closed", "Closed")])
-    return f"""<div class="card" data-k="{k}" data-tier="A">
+    return f"""<div class="card" {data}>
   {head}
   <div class="links">{''.join(links)}</div>
   <div class="email-hint">Likely email: <code>{html.escape(job.get('email_pattern',''))}</code> ({tag})</div>
@@ -212,9 +412,13 @@ def _card(job: dict) -> str:
 def _section(title: str, cls: str, note: str, rows: list[dict]) -> str:
     if not rows:
         return ""
+    # Cards live in their own container so the sort control can reorder them
+    # without shuffling the "show more" button along with them.
     cards = "\n".join(_card(r) for r in rows)
-    return (f'<div class="sect"><h2><span class="tag {cls}">{title}</span>'
-            f'<span class="note">{len(rows)} · {note}</span></h2>{cards}</div>')
+    return (f'<div class="sect" data-sect="{cls}"><h2><span class="tag {cls}">{title}</span>'
+            f'<span class="note">{len(rows)} · {note}</span></h2>'
+            f'<div class="cards">{cards}</div>'
+            f'<button class="more" style="display:none"></button></div>')
 
 
 def render(rows: list[dict], path: str) -> str:
@@ -222,17 +426,51 @@ def render(rows: list[dict], path: str) -> str:
     stamp = dt.datetime.now().strftime("%d %b %Y, %H:%M")
     a = [r for r in rows if r.get("tier", "A") == "A"]
     b = [r for r in rows if r.get("tier", "A") == "B"]
+    # Labels live in the JS (VIEWS) so counts and predicates can't drift apart;
+    # the buttons are rendered from the same list at load.
+    chips = "".join(
+        f'<button data-f="{k}"{" class=\"on\"" if k == "todo" else ""}{t}>{lbl}<i>0</i></button>'
+        for k, lbl, t in [
+            ("todo", "To do", ' title="Everything still owed an action — the daily driver"'),
+            ("toapply", "To apply", ' title="Not applied yet, not dismissed"'),
+            ("applied", "Applied", ' title="Ticked applied"'),
+            ("messaged", "Messaged", ' title="Referral ask sent, awaiting a reply"'),
+            ("due", "Follow-up due", ' title="Messaged 4+ days ago with no reply"'),
+            ("replied", "Replied", ""),
+            ("closed", "Closed", ' title="Referral thread closed out"'),
+            ("gone", "Posting gone", ' title="No longer on the company board — the Apply link is dead"'),
+            ("nofit", "Not a fit", ' title="Dismissed — undo one from here"'),
+            ("open", "Still open", ' title="Anything not finished or dismissed"'),
+            ("all", "Everything", ""),
+        ])
+    # counts are filled in by paint() — the tier a row sits in is static, but how
+    # many of them survive the open view is not.
+    tiers = "".join(
+        f'<button data-t="{k}"{t}>{lbl}<i>0</i></button>'
+        for k, lbl, t in [
+            ("all", "Both", ""),
+            ("A", "A-tier", ' title="Referral-worthy — the ones to spend effort on"'),
+            ("B", "B-tier", ' title="Bulk apply — no referral hunt"'),
+        ])
+    gone = sum(1 for r in rows if r.get("closed"))
+    live = len(rows) - gone
+    sub = (f"{live} live · {gone} closed · generated {stamp} — "
+           "apply, ask for the referral, track follow-ups. Progress saved in this browser.")
     body = f"""<h1>Your job worklist</h1>
-<div class="sub">{len(rows)} roles · generated {stamp} · apply, ask for the referral, track follow-ups — progress saved in this browser</div>
+<div class="sub">{sub}</div>
 <div class="bar">
-  <span class="pill todo"><b id="c-apply">0</b> to apply</span>
-  <span class="pill due"><b id="c-due">0</b> follow-up due</span>
-  <span class="pill"><b id="c-ref">0</b> applied, need referral</span>
-  <span class="filter">
-    <button data-f="action" class="on">Needs action</button>
-    <button data-f="open">All open</button>
-    <button data-f="all">Everything</button>
-  </span>
+  <span class="filter">{chips}</span>
+  <span class="tiers">{tiers}</span>
+  <input id="q" class="search" type="search" placeholder="Search role or company…"
+         autocomplete="off" spellcheck="false">
+  <span class="sortwrap"><label for="sort">Sort</label>
+    <select id="sort">
+      <option value="new">Newest first</option>
+      <option value="score">Best fit</option>
+      <option value="co">Company A–Z</option>
+    </select></span>
+  <span class="pill"><b id="c-done">0</b> applied</span>
+  <span class="pill"><b id="c-ref">0</b> need referral</span>
 </div>
 {_section("A-tier", "a", "apply + ask for a referral", a)}
 {_section("B-tier", "b", "autofill, apply, tick — no referral hunt", b)}

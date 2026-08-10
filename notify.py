@@ -6,6 +6,7 @@ locally). With no webhook set, messages print to stdout so you can test dry.
 from __future__ import annotations
 import os
 import json
+import time
 import requests
 
 WEBHOOK = os.environ.get("SLACK_WEBHOOK_URL", "").strip()
@@ -63,6 +64,69 @@ def _send(payload: dict) -> None:
 def send_heartbeat(text: str) -> None:
     """One-line status ping so a quiet run is visibly alive, not silently dead."""
     _send({"text": text})
+
+
+def _ago(since: float) -> str:
+    """How long this board has been down, in the units a human worries in."""
+    hours = max(0.0, (time.time() - since)) / 3600
+    return f"{hours:.0f}h" if hours < 48 else f"{hours / 24:.0f}d"
+
+
+def send_board_alert(broken: list[tuple[str, str, str, float, int]]) -> None:
+    """Name the boards that have been failing run after run.
+
+    Board errors used to appear only in the no-fit heartbeat, and only as a
+    count — so a board that had moved (Tekion, Greenhouse → Ashby) went unnoticed
+    for days on every run that found jobs. A dead board is invisible supply loss:
+    nothing looks wrong, there are simply fewer roles.
+
+    The elapsed time is here because the run count alone reads as small — "3
+    runs" sounds like minutes, but the schedule is hourly and GitHub throttles
+    even that (measured 2026-08-09: 8-21 runs/day, median gap 97 min), so 3
+    runs is a good chunk of a day.
+
+    `detail` is a phrase rather than a count because a board can now be reported
+    for two different reasons — failing outright, or failing intermittently —
+    and "failing 1 runs" would badly understate a board that has quietly lost a
+    third of its runs.
+    """
+    if not broken:
+        return
+    lines = [f"• *{name}* — {detail} · first seen {_ago(since)} · `{err[:110]}`"
+             for name, detail, err, since, _ in broken[:8]]
+    _send({"blocks": [
+        {"type": "section", "text": {"type": "mrkdwn",
+         "text": f"⚠️ *{len(broken)} job board(s) failing* — these companies are "
+                 f"contributing nothing right now:\n" + "\n".join(lines)}},
+        {"type": "context", "elements": [{"type": "mrkdwn",
+         "text": "_Usually the company moved ATS. Fix the entry in `companies.yaml`._"}]},
+    ]})
+
+
+def send_supply_alert(thin: list[tuple[str, int, int]]) -> None:
+    """Name boards that answered, but with far fewer jobs than they normally hold.
+
+    The board alert above only covers a board that fails outright. This is the
+    half-failure it cannot see: on 2026-08-09 Comcast returned 1 job from a
+    20-job board and counted as a clean success, because nothing had failed in
+    any way a "did it throw?" check could notice.
+
+    Worded as a comparison rather than a count, because the number alone means
+    nothing without the board's own normal — "Comcast: 1 job" reads like a small
+    board, "1, usually ~20" reads like the problem it is.
+    """
+    if not thin:
+        return
+    lines = [f"• *{name}* — {n} job(s), usually ~{base} "
+             f"({round(100 * (1 - n / base))}% down)" for name, n, base in thin]
+    _send({"blocks": [
+        {"type": "section", "text": {"type": "mrkdwn",
+         "text": f"📉 *{len(thin)} board(s) returning far less than usual* — these "
+                 f"answered fine, with most of their jobs missing:\n" + "\n".join(lines)}},
+        {"type": "context", "elements": [{"type": "mrkdwn",
+         "text": "_Usually rate-limiting, or a parser that broke on a retemplated portal. "
+                 "Check the ⚠️ list-request warnings in the run log._"}]},
+    ]})
 
 
 def send_bulk(jobs: list[dict]) -> None:
@@ -140,7 +204,7 @@ if __name__ == "__main__":
         "_referrers": "https://www.linkedin.com/search/results/people/",
         "_alumni": "https://www.linkedin.com/search/results/people/",
         "_email_pattern": "flast@stripe.com", "_email_researched": True,
-        "_dm": "Hi — I'm a software engineer (~1 yr, full-stack + AI). "
+        "_dm": "Hi — I'm Alex Doe, a software engineer (~1 yr, full-stack + AI). "
                "I'm applying for Full Stack Engineer at Stripe and would love a referral.",
         "_email_subject": "Referral request — Full Stack Engineer",
     }])
