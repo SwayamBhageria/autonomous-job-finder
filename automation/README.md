@@ -5,10 +5,10 @@
 The poller runs on GitHub Actions and reports to Slack. That means **a dead poller
 and a quiet job market produce exactly the same thing on your phone: silence.**
 
-That is not hypothetical. It cost a 24-hour blackout: one run sat in `queued`
-without ever being assigned a runner, and because a waiting run holds the
-concurrency group, every scheduled run behind it was cancelled in turn. Nothing
-polled. Not even the heartbeat fired. It was caught only by chance.
+That failure mode is not hypothetical. A run can sit in `queued` without ever being
+assigned a runner, and because a waiting run holds the concurrency group, every
+scheduled run behind it is cancelled in turn. Nothing polls, and nothing says so:
+the pipeline that would have reported the problem is the pipeline that stopped.
 
 **Nothing inside the poller can ever catch this** — the detector would have to run.
 So the watchdog lives on separate always-on hardware, and the logic is inverted:
