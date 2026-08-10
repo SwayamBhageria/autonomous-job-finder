@@ -2,7 +2,7 @@
 
 An autonomous job-discovery pipeline. It polls **211 companies' own career boards**,
 pulls roughly **27,000 job postings per run**, scores the new ones against a candidate
-profile using an LLM as judge, and pushes only the genuinely good matches to Slack.
+profile using an LLM as judge, and pushes only the good matches to Slack.
 
 It runs entirely on GitHub Actions' free tier, commits its own state back to the repo,
 and needs no server, no database, and no paid API. Two dependencies: `requests` and
@@ -44,54 +44,61 @@ boards, and the applications that convert are the ones sent within hours of post
 
 So: skip the aggregators, poll the source, and let a model do the reading.
 
-## What it does
+## Features
 
-* Polls **211 career boards** through **20 ATS adapters**, plus a local inbox seam for
-  boards that expose no usable API at all.
-* Normalises every board's response shape into one dict, so the rest of the pipeline
-  never learns which ATS a role came from.
-* Filters by title and location, deduplicates by *role identity*, and scores what
-  survives with a two-stage funnel: a cheap keyword heuristic, then an LLM fit-gate.
-* Produces a Slack alert per good role plus an HTML cockpit for working the list:
-  apply links, referral and alumni search, an inferred email pattern, and a drafted
-  outreach message.
-* Watches itself. Board health, supply anomalies, and an off-host dead-man's switch all
-  report independently of the pipeline they monitor.
+* **211 career boards** behind **20 ATS adapters**, plus a local inbox seam for boards
+  that expose no usable API.
+* One normalised job schema, so nothing downstream knows which ATS a role came from.
+* Two-stage scoring: a cheap keyword heuristic, then an LLM fit-gate, so LLM calls are
+  spent only on plausible roles.
+* Slack alerts per match, plus an HTML cockpit with apply links, referral and alumni
+  search, an inferred email pattern, and a drafted outreach message.
+* Four independent layers of failure detection, plus an off-host dead-man's switch.
+* No database. State is JSON committed back to the repo by the workflow.
 
-## Engineering highlights
+## Architecture
 
-**20 ATS adapters behind one interface.** Greenhouse, Lever, Ashby, Workday,
-SmartRecruiters, Workable, Eightfold, Keka, Darwinbox, iCIMS, Rippling, Oracle and
-others each expose jobs differently: different auth, pagination, and response shapes,
-some with no documented API at all. `ats.py` normalises all of them to one dict. Amazon,
-Uber, Google and Atlassian needed bespoke adapters because their boards don't use a
-standard ATS.
+### Adapter layer (`ats.py`)
 
-One of them was cracked by reading the site's own JavaScript bundle rather than watching
-the network tab. Single-page career portals serve the same shell on every route, so
-path-guessing finds nothing, while `main.js` carries the endpoint map outright.
+Greenhouse, Lever, Ashby, Workday, SmartRecruiters, Workable, Eightfold, Keka, Darwinbox,
+iCIMS, Rippling and Oracle each expose jobs differently: different auth, pagination, and
+response shapes. Amazon, Uber, Google and Atlassian don't use a standard ATS and have
+bespoke adapters. Every one returns the same dict, so the rest of the pipeline is
+ATS-agnostic.
 
-**A filtered API that ignores your filter still returns 200.** One board's parameter names
-are unforgiving and wrong ones are silently ignored rather than rejected: `countries` not
-`country`, spelled out (`India`, not `IND`), lowercase `pagesize`. Get any of them wrong
-and you get a perfectly valid 200 holding page 1 of the *unfiltered global* list. So the
-adapter pins the names to the site's own query-key bundle and asserts the filter actually
-narrowed: India is a small slice of a ~670-role global board, so a full first page means
-the filter did not apply.
+Adding a board is one line in `companies.yaml`. Adding an ATS is one function returning
+the normalised dict, plus a line in the dispatch table.
 
-**Four layers of failure detection.** Fault isolation, catching each board's exception so
-one bad adapter can't kill the run, is the obvious design and it is not sufficient. The
-expensive failures never raise at all:
+Two implementation notes that generalise to most third-party board APIs:
 
-* An adapter fans a board out into (query × page) sub-requests. If each one swallows its
-  own failure into an empty list, a tenant rate-limiting the whole burst returns `[]`
-  with no exception. Downstream that is indistinguishable from "the board is up and has
-  nothing on it". Observed live: one board returned `61 → 0 → 59 → 0` across four
-  consecutive runs while every health check reported green.
-* Partial loss is harder still. A board returning **1 job out of 20** passes every
-  "did it throw?" check ever written.
+* **Single-page career portals serve the same shell on every route**, so probing paths
+  finds nothing. The endpoint map is usually in the site's own `main.js`.
+* **A filtered API that ignores your filter still returns 200.** Some boards silently
+  ignore unrecognised parameters rather than rejecting them (`countries` not `country`,
+  `India` not `IND`, lowercase `pagesize`), and hand back page 1 of the *unfiltered
+  global* list. Adapters pin parameter names to the site's own query-key bundle and
+  assert the filter actually narrowed the result.
 
-So the pipeline asserts positive expectations rather than the absence of errors:
+### Scoring (`fit.py`, `gemini_fit.py`)
+
+`fit.py` applies a cheap keyword heuristic first, dropping roles with the wrong stack,
+too much seniority, or an experience bar above target. Survivors go to `gemini_fit.py`,
+which scores 0-100 using schema-constrained JSON output, batched to stay inside the free
+tier. If the key is missing or the call fails, it retries with backoff and then falls
+back to heuristic ranking, so the LLM is an upgrade rather than a hard dependency.
+
+Thresholds are set to values the model actually emits. The scorer produces multiples of
+5 and nothing between, so a threshold of 72 behaves identically to 75 and silently
+discards the whole 70 band. For the same reason, the ceiling applied to a listing whose
+description could not be read is pinned strictly *below* the pass mark, so an unreadable
+listing can never score as a match.
+
+### Failure detection (`poller.py`)
+
+Catching each board's exception keeps one bad adapter from killing the run, but it only
+covers boards that fail loudly. A board can return a partial result, or an empty list,
+and look exactly like a board that is up and has nothing on it. So the pipeline asserts
+positive expectations rather than the absence of errors:
 
 | layer | catches | mechanism |
 |---|---|---|
@@ -100,56 +107,44 @@ So the pipeline asserts positive expectations rather than the absence of errors:
 | flap detection | intermittent failure | rolling 12-run window per board, not just consecutive-failure streaks |
 | supply anomaly detection | silent partial loss, parser rot, reshaped board | compare each board against **its own 8-run median**, alert below 50% |
 
-The last one is mechanism-independent, which is the point. It catches a rate-limited
-fetch, a parser that broke on a retemplated portal, and a board that quietly changed
-shape, none of which raise anything. The baseline is a median so a single bad run can't
-move it, and it re-baselines naturally: a board that stays low stops alerting instead of
-becoming noise.
+The supply check is deliberately mechanism-independent: it asserts the outcome (this
+board should return roughly as many jobs as it usually does) rather than any particular
+cause, so it catches a throttled fetch, a parser broken by a retemplated portal, and a
+board that quietly changed shape, none of which raise. Counting failed sub-requests
+instead would be noise, since a board's queries overlap heavily and a board can lose a
+third of its requests while still returning every one of its jobs.
 
-**Alerting on outcomes, not mechanisms.** The intuitive supply metric is *how many
-sub-requests failed*, and it is the wrong one. A board's queries overlap heavily, so one
-board lost 6 of 18 requests and still returned all 73 of its jobs. Reporting that would
-flag several boards a run that lost nothing. Assert the thing you actually care about
-(this board should return roughly as many jobs as it usually does) rather than the thing
-that happens to be easy to measure.
+The baseline is a median so one bad run cannot move it, and it re-baselines: a board that
+settles at a new normal stops alerting rather than nagging forever.
 
-**An off-host dead-man's switch.** The poller reports to Slack, so a dead poller and a
-quiet job market produce the same thing on your phone: silence. Nothing inside the
-pipeline can catch that, because the detector would have to run. So each successful run
-stamps a heartbeat on separate always-on hardware, and *silence* is the trigger. It
-deliberately avoids polling the GitHub API, which would need a token, and tokens expire
-silently. A watchdog that dies with its own credential is the exact failure it exists to
-prevent. See [`automation/`](automation/).
+### State (`outreach_store.py`)
 
-**Two-stage scoring, because LLM calls aren't free.** A cheap keyword heuristic
-(`fit.py`) drops obviously wrong roles first: wrong stack, too senior, experience bar too
-high. Only survivors reach the Gemini fit-gate (`gemini_fit.py`), which scores 0-100
-using schema-constrained JSON output, batched to stay inside the free tier. If the key is
-missing or the call fails, it retries with backoff and then falls back to heuristic
-ranking, so the LLM is an upgrade rather than a hard dependency.
+State lives in `state/*.json`, committed back by the workflow. Scheduled runs can overlap,
+so the push does rebase-and-retry rather than risk losing a write and re-alerting a whole
+batch. Roles are deduplicated by *role identity* (company, normalised title, location)
+rather than requisition ID, so reposts and duplicate reqs stay quiet. Each key stores its
+verdict alongside it and is re-swept when scoring changes, since a dedup memory outlives
+the logic that filled it.
 
-**Thresholds derived from the model's output distribution.** The scorer emits multiples
-of 5 and nothing in between, so a threshold of 72 is not "slightly above 70", it is
-*exactly* 75, and it silently discards the entire 70 bucket. A related rule falls out of
-the same observation: the ceiling applied to a listing whose description could not be
-read must sit strictly *below* the pass mark, or every unknown lands exactly on it and
-"we couldn't read this" scores the same as "this is a strong match". Set thresholds from
-the values a model actually produces, not from round numbers.
+Anything that accumulates is re-checked and capped rather than grown append-only; a list
+of open roles is mostly dead links within weeks.
 
-**Idempotent state on a repo, no database.** State lives in `state/*.json`, committed
-back by the workflow. Scheduled runs can overlap, so the push does rebase-and-retry:
-losing a state write would mean re-alerting every role in that batch. Roles are
-deduplicated by *role identity* (company, normalised title, location) rather than
-requisition ID, so reposts and duplicate reqs stay quiet. The stored verdict lives
-alongside the key and is re-swept whenever scoring changes, since a dedup memory outlives
-the scoring logic that filled it.
+### Watchdog (`automation/`)
 
-**Two tiers, because effort should match odds.** Cold applications convert at a few
-percent; referral-backed ones convert far better. A-tier roles get the full workup:
-referral search links, alumni lookup, inferred email pattern, a drafted outreach message.
-B-tier becomes a compact bulk-apply list. The band is `[bulk_threshold,
-notify_threshold)`, so setting the floor equal to the ceiling empties it and runs A-tier
-only. One number, reversible.
+The poller reports to Slack, so a dead poller and a quiet job market look the same from
+outside: silence. Nothing inside the pipeline can detect that, because the detector would
+have to run. Each successful run stamps a heartbeat on separate always-on hardware, and
+silence past a grace window is the trigger. It avoids polling the GitHub API on purpose,
+since that needs a token and tokens expire; a watchdog that dies with its own credential
+defeats the point. See [`automation/`](automation/).
+
+### Tiers
+
+Cold applications convert at a few percent; referral-backed ones convert far better.
+A-tier roles get the full workup (referral search links, alumni lookup, inferred email
+pattern, drafted outreach message); B-tier becomes a compact bulk-apply list. The band is
+`[bulk_threshold, notify_threshold)`, so setting the floor equal to the ceiling empties it
+and runs A-tier only.
 
 ## Setup
 
@@ -168,12 +163,12 @@ stay that way.
 |---|---|---|
 | `GEMINI_API_KEY` | no | Enables the LLM fit-gate; falls back to heuristics without it |
 | `SLACK_WEBHOOK_URL` | no | Where alerts go; prints to stdout without it |
-| `ADZUNA_APP_ID` / `ADZUNA_APP_KEY` | no | Optional aggregator; no-ops when unset |
+| `ADZUNA_APP_ID` / `ADZUNA_APP_KEY` | no | Optional aggregator adapter; no-ops when unset |
 | `WATCHDOG_SSH_KEY` / `WATCHDOG_HOST` | no | Heartbeat target; the step skips when unset |
 
 Every one is optional and the pipeline degrades gracefully without them.
 
-### Running
+### Usage
 
 ```bash
 python poller.py              # normal scheduled run
@@ -183,16 +178,16 @@ python poller.py --seed       # record current matches silently (first run)
 python poller.py --outreach   # re-render the cockpit from committed state
 ```
 
-Use `--dry-run` when testing changes. A normal run writes state, so a role marked
+Use `--dry-run` when testing changes. A normal run writes state, and a role recorded as
 already-seen will not alert again.
 
 ### Scheduling
 
-`.github/workflows/poll.yml` runs the poller and commits state back. Note that GitHub
-**throttles scheduled workflows** on free runners: an hourly cron here delivers a measured
-8-21 runs a day, median gap around 97 minutes. Derive intervals from stored timestamps
-rather than from a run count, and size any health threshold against the measured cadence
-rather than the cron you asked for.
+`.github/workflows/poll.yml` runs the poller and commits state back. GitHub **throttles
+scheduled workflows** on free runners: an hourly cron here delivers a measured 8-21 runs a
+day, median gap around 97 minutes. Derive intervals from stored timestamps rather than a
+run count, and size health thresholds against the real cadence rather than the requested
+cron.
 
 ## Configuration
 
@@ -202,13 +197,9 @@ rather than the cron you asked for.
 | `filters.yaml` | Title/location matching, score thresholds, per-run and per-company caps |
 | `profile.yaml` | Your identity, CV, and preferences (gitignored) |
 
-Adding a company is one line. Adding a new ATS is one function in `ats.py` returning the
-normalised dict, plus a line in the dispatch table.
-
-A board earns its place by producing roles you could realistically get, verified before it
-lands. Several plausible-looking additions turned out to carry no engineering roles at
-all, or only roles well above the target level. That governs *adding*, though: a quiet
-board is not a broken one.
+A board earns its place by producing roles the candidate could realistically get, checked
+before it lands; plenty of plausible-looking boards carry no relevant roles at all. That
+applies to adding, though, not pruning: a quiet board is not a broken one.
 
 ## Layout
 
@@ -230,8 +221,4 @@ board is not a broken one.
 
 Outreach is deliberately **assisted, not automated**. The tool drafts messages and finds
 the right people, but sending stays manual. Automating LinkedIn outreach risks the
-account, and the volume here is well within what a person can send by hand.
-
-Anything that accumulates needs a re-check pass and a hard cap, not just a retention
-window. A list of open roles is mostly dead links within weeks, so the cockpit re-checks
-entries and caps its own size rather than growing append-only.
+account, and the volume here sits well within what a person can send by hand.
