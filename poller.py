@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Job Finder — poll tier-1 companies' own career boards, keep only the roles
-that genuinely fit you, and Slack the top handful.
+that genuinely fit, and Slack the top handful.
 
 Pipeline per run:
     fetch boards → title+location match → NEW only (dedup)
@@ -83,6 +83,31 @@ def build_matcher(filters: dict):
                       and company_ok(j.get("company", "")))
 
 
+def level_gate(filters: dict):
+    """`(company, title, min_years) -> keep?` for the ruled-out level-II bands.
+
+    Lives here rather than in `build_matcher` because it needs the JD, and the
+    matcher runs on the board listing before any description is fetched. The
+    whole point of the rule is that the JD gets the final say: a level-II
+    posting at one of these companies survives if it states a floor at or below
+    `max_years`, and only a posting we have read and found asking for more (or
+    stating nothing at all) is dropped.
+    """
+    cfg = filters.get("level_gate") or {}
+    cos = [c.lower() for c in (cfg.get("companies") or [])]
+    if not cos:
+        return lambda company, title, min_years: True
+    pat = re.compile(cfg.get("title") or r"\b(?:ii|2)\b", re.I)
+    cap = cfg.get("max_years", 1)
+
+    def keep(company: str, title: str, min_years: int | None) -> bool:
+        if (company or "").lower() not in cos or not pat.search(title or ""):
+            return True
+        return min_years is not None and min_years <= cap
+
+    return keep
+
+
 def key(j: dict) -> str:
     return f"{j['source']}:{j['company']}:{j['id']}"
 
@@ -111,7 +136,7 @@ def worth_realerting(score: int, prev: dict | None, threshold: int) -> bool:
     came — were now worth 85-95. A backlog sweep on 2026-08-09 found 53 such
     roles still open and 41 of them permanently silenced by this check:
     BlackRock 95, Amgen 92, Amazon SDE I 90, Sarvam AI 88. Those are not roles
-    you passed on. They are roles the scorer got wrong and could not retract.
+    You passed on them. They are roles the scorer got wrong and could not retract.
 
     So a role that now clears the A-tier bar, having last been alerted below it,
     is new information and gets said again. Records written before scores were
@@ -281,6 +306,20 @@ def error_summary(errors: list[str]) -> str:
     return f"  ⚠️ {len(names)} board(s) errored: {shown}."
 
 
+def maintenance_summary(down: list[str]) -> str:
+    """Say a vendor window happened, without dressing it as a fault.
+
+    It still belongs in the heartbeat: 63 boards dropping out is a real dent in
+    a run's supply and the quiet run that follows should be explained rather
+    than mysterious. But it reads as weather, not breakage — no ⚠️, and no
+    board named, because the boards are not the story and naming 8 of 63 at
+    random is what made the error line unreadable in the first place.
+    """
+    names = sorted({e.split(":", 1)[0] for e in down})
+    return (f"  🔧 {len(names)} board(s) skipped — the ATS vendor is in a "
+            "maintenance window; they come back on their own.")
+
+
 def load_state() -> dict:
     if STATE_FILE.exists():
         try:
@@ -317,19 +356,34 @@ def main() -> int:
     # --outreach just re-renders the cockpit from the committed tracker — no
     # polling, no network. Cheap, so the local `outreach` command runs it daily.
     if "--outreach" in sys.argv:
+        # Read the tracker the bot published, not this branch's copy of it. CI
+        # commits state/ to main; a checkout on any other branch holds a frozen
+        # copy, and a frozen tracker renders a *shrinking* page rather than a
+        # stale one — the age cutoff below runs against today while nothing new
+        # arrives. Seven days on a feature branch drained the cockpit from 51
+        # rows to 8, which looks like broken filters, not a stale file.
+        tracker, src = outreach_store.load_published(OUTREACH_FILE)
         # Prune before rendering, in memory only. The tracker on disk is written
         # by the CI run, so between runs this page was showing rows the current
         # filters had already retired — which is how B-tier stayed on the cockpit
         # for a day after being switched off. Rendering what the settings say is
         # live costs nothing here and never disagrees with the next CI write.
-        tracker, dropped = outreach_store.prune(
-            outreach_store.load(OUTREACH_FILE), load_yaml("filters.yaml"))
+        tracker, dropped = outreach_store.prune(tracker, load_yaml("filters.yaml"))
         rows = outreach_store.as_rows(tracker)
         out = str(ROOT / "outreach.html")
         outreach_page.render(rows, out)
         retired = sum(dropped.values())
         print(f"Wrote outreach cockpit ({len(rows)} roles"
               f"{f', {retired} retired' if retired else ''}) → {out}")
+        # Always name the source. The fallback is the very copy this change
+        # exists to stop rendering, so it must never happen quietly.
+        age = outreach_store.published_age(OUTREACH_FILE)
+        if src == "working tree":
+            print(f"WARNING: could not read {outreach_store.PUBLISHED_REF} — "
+                  f"rendered this branch's own state/outreach.json, which may be "
+                  f"stale. Check network/git, then re-run.")
+        else:
+            print(f"Source: {src} (bot last wrote it {age})")
         return 0
 
     if golive:
@@ -366,26 +420,52 @@ def main() -> int:
     tracker = outreach_store.load(OUTREACH_FILE)
     tracked_urls = {v.get("url") for v in tracker.values()}
     tracked_tks = set(tracker)
+    # Which boards this run only skimmed. Cleared first so a board that was
+    # partial last run and complete this run is not held against it.
+    ats.reset_coverage()
 
     def fetch_one(c):
         try:
             jobs = ats.fetch(c["name"], c)
+        except ats.BoardUnavailable as e:
+            return c, [], set(), set(), {}, 0, str(e), True
         except Exception as e:
-            return c, [], set(), set(), {}, 0, str(e)
+            return c, [], set(), set(), {}, 0, str(e), False
         urls, tks, relevant = set(), set(), {}
         for j in jobs:
             tk = title_key(j)
             urls.add(j.get("url", ""))
             tks.add(tk)
-            if j.get("url") in tracked_urls or tk in tracked_tks:
+            # A role key is title|company|location, and that is not unique on a
+            # big board: Qualcomm has SEVEN live requisitions called "Engineer"
+            # in Hyderabad. Whichever one `setdefault` happened to see first
+            # then became the row's Apply link and the JD that revalidate()
+            # read its experience bar out of — a different req's answer, and a
+            # different one run to run. So the tracked requisition itself wins
+            # whenever it is on the board; a sibling only fills in for a role
+            # whose own req is gone.
+            if j.get("url") in tracked_urls:
+                relevant[tk] = j
+            elif tk in tracked_tks:
                 relevant.setdefault(tk, j)
-        return c, [j for j in jobs if match(j)], urls, tks, relevant, len(jobs), None
+        return c, [j for j in jobs if match(j)], urls, tks, relevant, len(jobs), None, False
 
     matched, errors, fetched_ok, board_counts = [], [], set(), {}
+    unavailable = []
     live_urls, live_tks, live_rel, healthy = set(), set(), {}, set()
     with cf.ThreadPoolExecutor(max_workers=10) as ex:
-        for c, m, urls, tks, rel, n, err in ex.map(fetch_one, companies):
-            if err:
+        for c, m, urls, tks, rel, n, err, down in ex.map(fetch_one, companies):
+            if down:
+                # Deliberately in NEITHER bucket. Not an error: the vendor is in
+                # a maintenance window, which is not our bug, is not actionable,
+                # and must not accrue a board_health streak — 63 boards went down
+                # together on 2026-08-15 and would have alerted for as long as it
+                # lasted. Not a success either: an empty board cannot testify
+                # that a role is gone, so it stays out of `fetched_ok`,
+                # `healthy` and `board_counts` exactly as an error would.
+                unavailable.append(f"{c['name']}: {err}")
+                print(f"  {c['name']:<14}    – {err}")
+            elif err:
                 errors.append(f"{c['name']}: {err}")
             else:
                 # "fetched without raising" — distinct from `healthy` below,
@@ -414,6 +494,9 @@ def main() -> int:
           f"{'(golive: all open)' if golive else 'new'}.")
     if errors:
         print(f"{len(errors)} board(s) errored: " + "; ".join(errors[:5]))
+    if unavailable:
+        print(f"{len(unavailable)} board(s) skipped, vendor in maintenance: "
+              + "; ".join(unavailable[:5]))
     broken = board_health(errors, fetched_ok, persist=not (dry or backlog))
     if broken:
         print("Boards failing repeatedly: " +
@@ -458,18 +541,23 @@ def main() -> int:
               f"marked unreadable.")
 
     # ── Stage 1: hard experience cutoff + heuristic pre-score ────
-    scored, dropped_exp = [], 0
+    keep_level = level_gate(filters)
+    scored, dropped_exp, dropped_level = [], 0, 0
     for j in candidates:
         hs, meta = fit.score(j, profile)
         my = meta.get("min_years")
         if hard_years and my is not None and my >= hard_years:
             dropped_exp += 1
             continue                      # JD requires too much experience
+        if not keep_level(j.get("company", ""), j.get("title", ""), my):
+            dropped_level += 1
+            continue                      # level-II band ruled out at this company
         if hs >= floor:
             j["_h"], j["_meta"] = hs, meta
             scored.append(j)
     scored.sort(key=lambda j: -j["_h"])
     print(f"Dropped {dropped_exp} for requiring ≥{hard_years} yrs; "
+          f"{dropped_level} on the level gate; "
           f"{len(scored)}/{len(candidates)} passed heuristic floor ({floor}).")
 
     # ── Stage 2: Gemini fit-gate (falls back to heuristic) ───────
@@ -612,15 +700,23 @@ def main() -> int:
     # Re-check what's already listed against the boards as they are right now:
     # postings get pulled, and roles admitted under the old experience gate are
     # still sitting there because an alerted role never re-enters the pipeline.
-    def _years(j: dict) -> int | None:
+    def _years(j: dict) -> tuple[int, int] | None:
         if not j.get("description") and j.get("_detail"):
             ats.enrich_description(j)
-        return fit.min_years_required(j.get("description") or "")
+        return fit.experience_range(j.get("description") or "")
 
+    # Boards this run sampled rather than enumerated. A role missing from one of
+    # these is unproven, not pulled, so revalidate() gives them no vote — see
+    # its docstring for the Qualcomm role this hid for seven runs.
+    skimmed = set(ats.partial_boards())
+    if skimmed:
+        print(f"{len(skimmed)} board(s) only sampled, so absence proves nothing "
+              f"there: " + "; ".join(f"{n} ({w})"
+                                     for n, w in list(ats.partial_boards().items())[:4]))
     outreach_store.revalidate(
         tracker, live_urls, live_tks, healthy, live_rel,
         check_years=_years, hard_years=hard_years,
-        closed_after=filters.get("closed_after_misses", 2))
+        closed_after=filters.get("closed_after_misses", 2), partial=skimmed)
     tracker, dropped = outreach_store.prune(tracker, filters)
     outreach_store.save(OUTREACH_FILE, tracker)
     print(f"Tracker holds {len(tracker)} role(s) for the cockpit "
@@ -637,6 +733,8 @@ def main() -> int:
               f"{len(matched)} open matches, {len(candidates)} new since last run — nothing above {bar}.")
         if errors:
             hb += error_summary(errors)
+        if unavailable:
+            hb += maintenance_summary(unavailable)
         notify.send_heartbeat(hb)
         print("Sent heartbeat (no fit roles).")
 

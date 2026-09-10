@@ -31,12 +31,51 @@ title_include:
   - forward.?deployed
   - deployment strategist
 
+# ── Level-II band, where it has been ruled out ───────────────
+# NOT a company block, and NOT a title block — both would be wrong, and this
+# was built as the second one first. The rule (2026-08-11) is: at a place
+# where the level-II band is said not to convert at ~1 yr, a
+# level-II posting has to earn its place with the JD. **If the posting says 1+
+# yr it is still wanted.** So the title only decides which roles get asked the
+# question; the JD answers it.
+#
+# He applies to level-II roles constantly elsewhere — Mastercard SE II-1,
+# Meesho FDE-II, JPMorgan SE II, Oracle ASE 2 are all live applications — which
+# is why `companies` is a short, named list and not a global rule.
+#
+# Deliberately NOT here: JPMorgan Chase. He was rejected for one SWE II there,
+# but has three JPMC SWE II applications open across different teams, and one
+# team's no is not the bank's.
+#
+# `title` verified against the 4473 titles in seen_jobs: it matches "Software
+# Engineer II" / "Applied Scientist II" and leaves every "… I" / "… 1" /
+# "Associate" title alone. A role is only dropped once its JD has actually been
+# read (`regated`) — an unread JD is not evidence of anything.
+# Google was here and came OUT (2026-08-11, a deliberate call). The reason for
+# rejecting Google SWE II turned out not to be fit at all: Google caps concurrent
+# applications and blocks for 6-12 months after a rejection, so the slots were
+# saved for an SWE I. That is a quota decision the poller cannot see, and you want
+# to make it himself — "I'll manage when to apply or not, I just want the jobs I
+# see to be fit." A role hidden by this gate is a role he cannot choose to spend a
+# slot on, so Google roles stay visible and the years gate judges them normally.
+level_gate:
+  companies: [amazon]
+  title: '\b(?:ii|2)\b'
+  max_years: 1        # JD must state a floor at or below this to survive
+
 # If the title matches any of these, it's dropped (too senior / not eng / intern).
 title_exclude:
   - intern
   - internship
   - principal
-  - \bstaff\b
+  # Targets "Staff Engineer". The lookbehind is load-bearing: without it this
+  # also matched "Member of Technical Staff" and so cancelled that entry in
+  # title_include — which had therefore never once fired (0 of 5,850 titles in
+  # seen_jobs). MTS is the ordinary mid-level SWE title at Cockroach Labs,
+  # VMware, Nutanix, Oracle and Juniper, all with large India centres.
+  # Checked against 2,521 pre-filter titles off 8 live boards: still drops all
+  # 314 real "Staff …" titles, newly admits 7, every one an MTS role.
+  - '(?<!of technical )\bstaff\b'
   - director
   - \bvp\b
   - vice president
@@ -87,6 +126,13 @@ title_exclude:
   - engineer.{0,4}testing
   - \btest(ing)? engineer\b
   - quality analyst
+  # …and none of the four above catch the phrase spelled OUT. Amazon titles its
+  # QA roles "Quality Assurance Engineer I/II", never "QA": of the 16 QA-shaped
+  # titles on that board the list caught 7 and leaked 9, and two of the leaks
+  # were sitting in the cockpit at 80 and 75 on 2026-08-19. Calibrated against
+  # all 2,286 titles currently passing the filter — this rejects 11, every one
+  # of them genuinely QA, and nothing else.
+  - quality assurance
   # `embedded` alone was too greedy, and it misfired on exactly the roles
   # you most want. "Embedded" has two unrelated meanings in job titles:
   # firmware-on-a-chip, and embedded-WITH-a-customer-team (the FDE sense).
@@ -259,10 +305,23 @@ outreach_max_rows: 0
 
 # ── Quality gate (fit scoring) ───────────────────────────────
 # HARD DROP: if the JD states a required experience of this many years or
-# more, skip it entirely (before any scoring). 4 keeps "3+ yrs" JDs in play
-# (Indian postings often say 3+ but hire at ~1-2 yrs; Gemini still judges
-# seniority) while dropping clearly-senior 4+/5+ roles. Set 0 to disable.
-hard_drop_years: 4
+# more, skip it entirely (before any scoring). Set 0 to disable.
+#
+# 4 → 3 on 2026-08-11, and this one is measured rather than argued. The maintainer
+# reviewed 87 cockpit rows by hand and dismissed 38 as "not a fit". Reading the
+# live JD of every reviewed role that was still fetchable:
+#
+#   roles APPLIED to state a floor of  1 or 2 years — never more
+#   roles DISMISSED state                1 to 5
+#
+# At 3 the gate drops 9 dismissed roles (all scored 70-90) and 0 that were
+# applied to. At 4 it drops only 3 of them. The earlier "Indian postings say 3+
+# but hire at 1-2" reasoning is not what the review data shows: those roles do
+# not get applied to, so the alert is just noise.
+#
+# A range is read at its LOW end (see fit.min_years_required), so "2-5 years"
+# scores as 2 and survives — exactly such a role was applied to.
+hard_drop_years: 3
 
 # Stage 1 heuristic: roles below this are dropped before hitting Gemini.
 # 40 → 35 with the B-tier: the heuristic is a crude keyword count and was
@@ -359,3 +418,89 @@ max_bulk_per_company: 0
 # Restore a number here if a single company ever genuinely drowns the page —
 # but check WHICH company first. One board flooding is usually a filter bug
 # (a title_exclude that stopped matching), not a company that started hiring.
+
+# ─────────────────────────────────────────────────────────────
+#  Cold-email lane (outreach_mail.py) — DENY BY DEFAULT.
+#
+#  Only companies named here are ever written to. This is not an
+#  optimisation, it is the safety mechanism: 53 of the 57 companies on the
+#  cockpit are MNCs, where there is no founder to reach, the recruiter sits
+#  behind a process, and an unsolicited mail is both useless and slightly
+#  rude. An allowlist that goes stale under-sends, which is the failure mode
+#  you want; a blocklist that goes stale mails Amazon's CTO.
+#
+#  The bar for adding one: small enough that a named human plausibly reads
+#  their own inbox. Rough ceiling ~500 people. Measured 2026-08-13 —
+#  `firstname@company.com` resolved on 8/8 verifiable Indian startup domains,
+#  so the address is usually reachable; what decides is whether a person is.
+#
+#  team_sizes only affects WHO we pick (people.rank_title): under ~60 the
+#  founder answers their own mail, above it the engineering lead is the door.
+# ─────────────────────────────────────────────────────────────
+cold_email:
+  daily_cap: 12
+  per_company: 1
+  follow_up_days: 5
+  min_score: 75
+  pace_seconds: 20
+
+  # ── Where this lane will look, 2026-08-30 (the brief: "expand out of india") ──
+  # `regions` filters the COMPANY's own location; empty means anywhere. The
+  # poller stays India-only and should — it reads big boards where a US role is
+  # simply not takeable. This lane is the opposite: it writes to five-person
+  # startups that hire wherever the person is.
+  #
+  # Measured the day it was widened: of 1,478 YC companies currently hiring,
+  # only 53 are in India — while 489 of them already have a named founder in
+  # contacts/founders.json, and 484 of those sit outside India. India-only was
+  # discarding roughly nine tenths of the reachable list.
+  regions: []
+  # Widening the company filter alone changes nothing, because the ROLE still
+  # has to clear a location gate. This lets a role through when it explicitly
+  # says remote — but NOT when it says remote-and-region-locked ("Remote — US
+  # only", "Remote (EMEA)"), and NOT when it states no location at all, since
+  # an unstated location is unknown and unknown must never read as yes.
+  allow_remote_roles: true
+
+  # YC sourcing (`outreach_mail.py --yc`). YC India lists 52 companies hiring,
+  # and 46 of them expose no ATS board we poll — so this is the only way their
+  # roles are ever seen. Their domain comes from YC's authoritative `website`
+  # field, so YC rows need no entry in `domains` below.
+  #
+  # min_team is 0 deliberately: if you will accept equity, so a four-person
+  # company is not automatically out.
+  #
+  # yc_limit bounds the run — each company costs a homepage fetch, a careers
+  # fetch and a Gemini call. 0 = no limit.
+  min_team: 0
+  yc_limit: 25
+
+  # A company is eligible only if it appears in `domains` below. Deriving the
+  # domain from the name is NOT allowed, and the reason is specific: of ten
+  # companies checked on 2026-08-13, six derived wrongly — Level AI is
+  # thelevel.ai not levelai.com, Haptik is haptik.ai, Jupiter is jupiter.money.
+  # Worse than a miss, a wrong guess can land on a REAL company: kodo.tech and
+  # kodo.io are both live businesses that have nothing to do with the Kodo we
+  # mean. A guessed domain risks cold-emailing a stranger at an unrelated firm.
+  # Every entry below was confirmed to publish live MX.
+  domains:
+    Sarvam AI: sarvam.ai
+    Kodo: kodo.com
+    Level AI: thelevel.ai
+    Observe.ai: observe.ai
+    SpotDraft: spotdraft.com
+    smallcase: smallcase.com
+    Haptik: haptik.ai
+    Weekday: weekday.works
+    Jupiter: jupiter.money
+
+  team_sizes:
+    Sarvam AI: 80
+    Kodo: 100
+    Level AI: 150
+    Observe.ai: 250
+    SpotDraft: 200
+    smallcase: 200
+    Haptik: 300
+    Weekday: 30
+    Jupiter: 400

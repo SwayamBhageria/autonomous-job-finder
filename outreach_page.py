@@ -129,6 +129,8 @@ h2{font-size:14px;margin:24px 0 10px;display:flex;align-items:center;gap:9px}
 .flag.gone{background:var(--gone);color:#fff;font-weight:700}
 .flag.old{color:var(--due)}
 .flag.fresh{color:var(--done)}
+/* a stated bar at or above 2 yrs — survives the gate, still worth a second look */
+.flag.hot{color:var(--due);border:1px solid currentColor}
 .card.gone{opacity:.5}
 .card.gone .role a{text-decoration:line-through}
 .card.gone .links a.apply{pointer-events:none;opacity:.4;border-color:var(--line);color:var(--mut)}
@@ -338,13 +340,42 @@ def _flags(job: dict) -> str:
         out.append('<span class="flag gone">⚠️ Posting gone</span>')
     elif job.get("reposted"):
         out.append('<span class="flag">↻ relisted — link updated</span>')
+    elif job.get("sampled"):
+        # The board answered, but only a slice of it — we did not see this role
+        # and cannot say either way. Distinct from "posting gone", which is the
+        # claim this used to make on exactly these rows.
+        out.append('<span class="flag" title="This board returns more roles '
+                   'than one fetch reads, and this one was outside the slice we '
+                   'saw — still listed as far as we know">not re-checked</span>')
     elif job.get("verifiable") is False:
         # aggregator listing: no board of ours to re-poll, so we can't confirm it
         out.append('<span class="flag" title="Aggregator listing — we can\'t '
                    're-check whether it is still open">link unverified</span>')
-    if job.get("min_years"):
-        out.append(f'<span class="flag">asks {job["min_years"]}+ yrs</span>')
+    out.append(_years_flag(job))
     return f'<div class="meta">{"".join(out)}</div>'
+
+
+def _years_flag(job: dict) -> str:
+    """The JD's stated experience requirement — always shown, including when
+    there isn't one.
+
+    It used to render only `if job.get("min_years")`, which is silent in the two
+    cases that matter most. A JD asking "0+ years" is falsy and showed nothing;
+    far worse, a JD we could not read a requirement out of also showed nothing,
+    and the two are opposite facts wearing the same blank space. Reviewing 87
+    rows by hand, 38 were rejected — and the single most common reason was an
+    experience bar you could only discover by opening the link, because the page
+    had told you nothing either way.
+    """
+    lo, hi = job.get("min_years"), job.get("max_years")
+    if lo is None:
+        if not job.get("regated"):
+            return ''
+        return ('<span class="flag" title="We read the JD and it states no '
+                'experience requirement — treat the level as unknown">no yrs stated</span>')
+    span = f"{lo}–{hi}" if hi and hi > lo else f"{lo}+"
+    hot = " hot" if lo >= 2 else ""
+    return f'<span class="flag{hot}" title="Stated in the JD">asks {span} yrs</span>'
 
 
 def _card(job: dict) -> str:

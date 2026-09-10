@@ -1,6 +1,9 @@
 # ── Never commit: personal identity, CV text, salary floor ──
 profile.yaml
 
+# ── Never commit: harvested contact data on real people ──
+contacts/
+
 # ── Never commit: your actual job-search state ──
 # seen_jobs.json / outreach.json record which roles you've been shown and
 # which companies you're targeting. Personal, and useless to anyone else.

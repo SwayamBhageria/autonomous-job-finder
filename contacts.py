@@ -23,8 +23,22 @@ _DOMAIN = {
 }
 
 # Company → dominant email pattern, researched via LeadIQ/RocketReach public
-# format pages (Jul 2026). Companies not listed default to first.last (the most
-# common corporate pattern overall) and are flagged unverified in the alert.
+# format pages (Jul 2026). Those pages describe US enterprises, which is what
+# this table is: every entry below is a large American employer.
+#
+# The DEFAULT for everything unlisted used to be first.last, inherited from the
+# same US-enterprise sources — and it is wrong for the companies that actually
+# reach the cold-email path. Probed live 2026-08-13 against the eight Indian
+# startups whose founder names are public and whose mail server discriminates
+# (razorpay, zerodha, meesho, cred, sarvam, mudrex, fampay, zuddl):
+#
+#     first@       8/8
+#     first.last@  2/8
+#     flast@       0/8
+#
+# So unlisted now defaults to `first`. This only ever affects the display hint;
+# verify.resolve() walks the same patterns against the real server and is what
+# decides the address we actually send to.
 #   flast      = first initial + last name  (jdoe@)
 #   first_last = first_last with underscore (jane_doe@)
 _PATTERN = {
@@ -55,9 +69,10 @@ def email_domain(company: str) -> str:
 
 def email_pattern(company: str) -> tuple[str, bool]:
     """(pattern@domain, researched?) — researched means the dominant pattern was
-    looked up from public format databases; else it's the first.last default."""
+    looked up from public format databases; else it's the measured `first`
+    default (8/8 on Indian startups, see the table above)."""
     style = _PATTERN.get(company)
-    return f"{style or 'first.last'}@{email_domain(company)}", style is not None
+    return f"{style or 'first'}@{email_domain(company)}", style is not None
 
 
 def _search(keywords: str) -> str:

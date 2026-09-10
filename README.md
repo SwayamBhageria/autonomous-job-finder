@@ -1,7 +1,7 @@
 # Job Finder
 
-An autonomous job-discovery pipeline. It polls **211 companies' own career boards**,
-pulls roughly **27,000 job postings per run**, scores the new ones against a candidate
+An autonomous job-discovery pipeline. It polls **235 companies' own career boards**,
+pulls roughly **35,000 job postings per run**, scores the new ones against a candidate
 profile using an LLM as judge, and pushes only the good matches to Slack.
 
 It runs entirely on GitHub Actions' free tier, commits its own state back to the repo,
@@ -9,10 +9,10 @@ and needs no server, no database, and no paid API. Two dependencies: `requests` 
 `PyYAML`.
 
 ```
-211 career boards
+235 career boards
       │
       ▼   20 ATS adapters, normalised to one schema
- ~27,000 postings per run ───────────┐
+ ~35,000 postings per run ───────────┐
       │                              │
       ▼                              ▼
  title / location match      board health + supply
@@ -46,7 +46,7 @@ So: skip the aggregators, poll the source, and let a model do the reading.
 
 ## Features
 
-* **211 career boards** behind **20 ATS adapters**, plus a local inbox seam for boards
+* **235 career boards** behind **20 ATS adapters**, plus a local inbox seam for boards
   that expose no usable API.
 * One normalised job schema, so nothing downstream knows which ATS a role came from.
 * Two-stage scoring: a cheap keyword heuristic, then an LLM fit-gate, so LLM calls are
@@ -193,7 +193,7 @@ cron.
 
 | File | What it controls |
 |---|---|
-| `companies.yaml` | The 211 boards plus the inbox seam: `name`, `ats`, `token` (a public board slug) |
+| `companies.yaml` | The 235 boards plus the inbox seam: `name`, `ats`, `token` (a public board slug) |
 | `filters.yaml` | Title/location matching, score thresholds, per-run and per-company caps |
 | `profile.yaml` | Your identity, CV, and preferences (gitignored) |
 

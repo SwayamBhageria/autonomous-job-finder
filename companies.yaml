@@ -14,7 +14,17 @@ companies:
   - {name: Affirm,        ats: greenhouse, token: affirm}        # ~175 India
   - {name: Stripe,        ats: greenhouse, token: stripe}        # ~128 India
   - {name: Coinbase,      ats: greenhouse, token: coinbase}      # ~118 India
-  - {name: PhonePe,       ats: greenhouse, token: phonepe}       # ~50 India
+  #  PhonePe left Greenhouse (boards-api .../boards/phonepe 404s outright, not
+  #  a blip — three runs in a row, and every plausible token variant 404s too).
+  #  Their careers page is a JS-rendered Gatsby site with no ATS string in the
+  #  HTML; the careers bundle names a self-hosted feed,
+  #  www.phonepe.com/apollo/job-postings/latest.json — DO NOT adapt that one.
+  #  It is a teaser: 36 records of which only 6 are PUBLIC, no ids and no JD, so
+  #  it would fail open past the experience gate. Each PUBLIC record's applyUrl
+  #  names the real ATS underneath — SmartRecruiters, company PHONEPELIMITED —
+  #  and that board returns exactly those 6 with ids, full locations and JDs.
+  #  ~50 India on Greenhouse before; 6 now, so this is a genuinely smaller board.
+  - {name: PhonePe,       ats: smartrecruiters, token: PHONEPELIMITED} # 6 India / 1 pass
   - {name: Adyen,         ats: greenhouse, token: adyen}
   - {name: Chime,         ats: greenhouse, token: chime}
   - {name: slice,         ats: greenhouse, token: slice}
@@ -125,7 +135,7 @@ companies:
   - {name: Ubisoft,       ats: smartrecruiters, token: Ubisoft2}   # Pune/Mumbai studios
   - {name: Smartsheet,    ats: greenhouse, token: smartsheet}      # 8 match
   - {name: SingleStore,   ats: greenhouse, token: singlestore}     # 7 match
-  - {name: ClickHouse,    ats: greenhouse, token: clickhouse}      # 4 match (remote India)
+  - {name: ClickHouse,    ats: ashby,      token: clickhouse}      # left greenhouse Sep-26
   - {name: Zuora,         ats: greenhouse, token: zuora}           # 4 match
   - {name: Netskope,      ats: greenhouse, token: netskope}        # 3 match
   - {name: Yugabyte,      ats: greenhouse, token: yugabyte}        # 3 match
@@ -168,7 +178,7 @@ companies:
   # ~90 Indian companies probed against it; Apna is the only one with a board.
   - {name: Apna,        ats: workable,        token: apna}         # 122 roles, 75 India
 
-  # ── Aggregator — OFF, 2026-08-09. a deliberate call, and the numbers agree ──
+  # ── Aggregator — OFF, 2026-08-09. A deliberate call, and the numbers agree ──
   #  Adzuna aggregates thousands of Indian sources behind one API, which made it
   #  the only lever that scaled without hand-probing each company. It is off
   #  because it returns a ~200-char TEASER, never a job description.
@@ -190,19 +200,19 @@ companies:
   #  the ceiling to 65 did not break Adzuna — it revealed that Adzuna had never
   #  been contributing, only inflating the count.
   #
-  #  Re-enabling it needs a REAL JD, not a lower bar — an explicit call is
-  #  that he does not want bulk rows with no JD, so dropping bulk_threshold back
+  #  Re-enabling it needs a REAL JD, not a lower bar — the explicit call is
+  #  that bulk rows with no JD are not wanted, so dropping bulk_threshold back
   #  to 48 to catch these is the wrong fix. The teaser links to an adzuna.in
   #  landing page (not the employer), and that page answers 429 to the very
   #  first anonymous request — so a GitHub runner cannot fetch it. If it ever
-  #  comes back it goes through harvest/ on his Mac like Naukri, and only then.
+  #  comes back it goes through harvest/ on a local Mac like Naukri, and only then.
   #  Note company_exclude in filters.yaml STAYS: the harvest inbox feeds the
   #  same staffing-firm reposts this list was grown to screen.
   # - {name: Adzuna India, ats: adzuna, token: ""}
 
   # ── Browser-harvested inbox (Aug-06 2026) ────────────────────
   #  Reads state/inbox/*.jsonl, written by the nightly `/harvest` run that
-  #  drives Chrome on your Mac (harvest/sources.yaml for the company list).
+  #  drives Chrome on a local Mac (harvest/sources.yaml for the company list).
   #  This is the answer to the "login-walled / no public API" verdicts below:
   #  those are true for a GitHub runner making an anonymous GET, and false for
   #  a real browser. Naukri alone reaches ~40 Indian companies — Flipkart,
@@ -255,7 +265,7 @@ companies:
   - {name: Visa,           ats: smartrecruiters, token: visa}   # tiny board (2), but it's the real Visa one
 
   # ── Aug-06 2026: from a 121-company target list ───────
-  #  48 of his 121 were already polled. The remaining 73 were probed across
+  #  48 of the 121 were already polled. The remaining 73 were probed across
   #  greenhouse/lever/ashby/smartrecruiters, then the survivors against
   #  Workday. These are the ones with live boards.
   - {name: Harness,        ats: greenhouse,      token: harnessinc}      # 37 India / 92
@@ -387,7 +397,7 @@ companies:
   - {name: Thermo Fisher, ats: workday, host: thermofisher.wd5.myworkdayjobs.com, tenant: thermofisher, site: ThermoFisherCareers}  #  7 match,  4 pass — "Engineer I, Software" scored 90
   - {name: Cigna,         ats: workday, host: cigna.wd5.myworkdayjobs.com,        tenant: cigna,        site: CignaCareers}         #  7 match,  4 pass
   - {name: Dow,           ats: workday, host: dow.wd1.myworkdayjobs.com,          tenant: dow,          site: ExternalCareers}      #  3 match,  3 pass — "Full Stack Developer (.Net/Angular/Azure)"
-  - {name: Comcast,       ats: workday, host: comcast.wd5.myworkdayjobs.com,      tenant: comcast,      site: Comcast_Careers}      # 13 match,  2 pass
+  - {name: Comcast,       ats: workday, host: comcast.wd115.myworkdayjobs.com,    tenant: comcast,      site: Comcast_Careers}      # 13 match,  2 pass — tenant migrated off wd5 2026-08-22 (HTTP 410 ERR_TENANT_MIGRATED)
   - {name: Aptiv,         ats: workday, host: aptiv.wd5.myworkdayjobs.com,        tenant: aptiv,        site: Aptiv_Careers}        # 22 match,  2 pass
   - {name: Carrier,       ats: workday, host: carrier.wd5.myworkdayjobs.com,      tenant: carrier,      site: jobs}                 #  6 match,  2 pass
   - {name: Maersk,        ats: workday, host: maersk.wd3.myworkdayjobs.com,       tenant: maersk,       site: maersk_careers}       #  2 match,  1 pass (see casing note above)
@@ -445,7 +455,7 @@ companies:
   #  valid explicit value and the param must be PRESENT even then.
   #  But the yield is the point, and it was measured before shipping: across all
   #  nine tenants the whole cluster carries TWO engineering roles, both SDE
-  #  II/III at 3-9 yrs — above the target seniority ceiling. Everything else is sales, ops,
+  #  II/III at 3-9 yrs — above the level this targets. Everything else is sales, ops,
   #  counselling and store staff. These companies run Darwinbox for HR and post
   #  engineering somewhere else. Last session called this "the single biggest
   #  Indian prize" on fingerprint COUNTS; job counts say otherwise.
@@ -482,7 +492,7 @@ companies:
   #  TurboHire: Ola (olacareers).  Zoho Recruit: Zoho.  SuccessFactors: PayU.
 
   #  ── Tier-1 sweep, Aug-08 2026: added on MEASURED fit, not on name ──
-  #  the rule, and it is the right one: a board earns its place by
+  #  The rule here, and it is the right one: a board earns its place by
   #  producing roles HE can get at 18L+, not by adding to the board count.
   #  Evidence for that rule, from state/: the top supply is Bosch 325 / Amazon
   #  293 / JPMorgan 148 / Mastercard 133 in 90 days, with the best scores (85-90)
@@ -498,7 +508,7 @@ companies:
   - {name: Microsoft, ats: pcsx, host: apply.careers.microsoft.com, domain: microsoft.com}   # 61 fetched, 8 match — "Software Engineer II" Bangalore, "Apps Full Stack Engineer"
   - {name: Barclays, ats: workday, host: barclays.wd3.myworkdayjobs.com, tenant: barclays, site: External_Career_Site_Barclays}   # 23 India, 3 match — "Full Stack Engineer", fintech = his bonus sector
   - {name: F5, ats: workday, host: ffive.wd5.myworkdayjobs.com, tenant: ffive, site: f5jobs}   # 17 India, 3 match — "Software Development Engineer II"
-  - {name: Atlassian, ats: atlassian}   # 232 jobs, 22 India, 13 eng — but ALL Principal/Senior/Head today, 0 at his level. Cheap, and the board turns over.
+  - {name: Atlassian, ats: atlassian}   # 232 jobs, 22 India, 13 eng — but ALL Principal/Senior/Head today, 0 at the target level. Cheap, and the board turns over.
   #  ── iCIMS / Jibe "CSX" front end — token is the careers HOST, not a tenant ──
   #  https://{host}/api/jobs returns JSON with description+responsibilities+
   #  qualifications INLINE (no detail fetch). The *.icims.com hostnames these
@@ -526,9 +536,9 @@ companies:
   #    Wipro/Infosys/TCS/Accenture/Cognizant — deliberately NOT added. Services
   #      firms sit far below the 18L bar and would flood the cockpit.
   #  ── Quant funds / HFT, Aug-08 2026 — the best fit-per-role on the whole list ──
-  #  the ask: recognisable tier-1 names where a referral actually converts,
+  #  The ask: recognisable tier-1 names where a referral actually converts,
   #  paying well above the 18L bar. Quant funds are exactly that and had been
-  #  missed entirely — they are finance (his stated bonus sector), their India
+  #  missed entirely — they are finance (a stated bonus sector), their India
   #  desks are Bangalore/Bengaluru, and they hire at 0-3 yrs.
   - {name: Point72,    ats: greenhouse, token: point72}   # 231 jobs, 37 India, 18 match, 10 CLEAR THE GATE — "Software Engineer, Technology" 2yrs, "…Equities Middle Office", "…Macro Middle Office" Bengaluru
   - {name: Millennium, ats: eightfold, token: mlp}        # 55 jobs, ALL India, 22 match, 5 clear — "Quantitative Developer (Python)" 2yrs, "Angular Developer", "Full Stack Software Engineer" Bangalore
@@ -542,6 +552,50 @@ companies:
   #    Jane Street, Two Sigma, DRW, Citadel (403), Balyasny, Akuna.
   - {name: Qualcomm, ats: pcsx, host: careers.qualcomm.com, domain: qualcomm.com}   # 105 fetched, 13 match, 9 pass
   - {name: Ericsson, ats: pcsx, host: jobs.ericsson.com,    domain: ericsson.com}   # 54 fetched, 20 match, 10 pass — "Software Backend Developer Java Spring Boot" 83
+
+  # ── Mined from 11 circulated job-list spreadsheets, 2026-08-20 ───────────
+  #  Full working set in ~/prometheus/job-lists (companies + founder contacts).
+  #  3,729 unique companies in those sheets; only 121 were already above.
+  #  None of these landed on headcount or brand: each board was FETCHED LIVE
+  #  and every role run through this repo's own title_include/title_exclude/
+  #  location_include. The comment is India roles / roles PASSING that filter.
+  #  Boards that cleared the filter only with off-stack roles (semiconductor
+  #  design + validation, IT helpdesk, SFDC, sales) were deliberately left out
+  #  — see job-lists/out/board_watchlist.txt for those and why.
+  #  The cluster worth watching is forward-deployed: Cursor, LiveKit, LiteLLM,
+  #  Cartesia, Handshake and Workato all list FDE roles in India, and
+  #  profile.yaml weights FDE the same as core SWE.
+  - {name: Anaplan,             ats: greenhouse,      token: anaplan}             # 67 India / 15 pass — "Backend Engineer" Gurugram x2
+  - {name: CynLr,               ats: freshteam,       token: cynlr}               # 39 India / 13 pass — Bengaluru vision-robotics; "Web Developer"
+  - {name: Celonis,             ats: greenhouse,      token: celonis}             # 33 India / 11 pass — "AI Engineer - Quality" Bangalore
+  - {name: AlphaSense,          ats: greenhouse,      token: alphasense}          # 55 India / 10 pass
+  - {name: Renesas Electronics, ats: smartrecruiters, token: renesaselectronics}  #133 India /  8 pass — "Software Engineer – Frontend Developer (Angular)" Bangalore
+  - {name: Workato,             ats: greenhouse,      token: workato}             # 11 India /  7 pass — "Forward Deployed Engineer" Hyderabad x2
+  - {name: Abnormal Security,   ats: greenhouse,      token: abnormalsecurity}    # 10 India /  4 pass — "Software Engineer II - Full Stack" Bangalore
+  - {name: Bolna AI,            ats: ashby,           token: bolna}               #  8 India /  2 pass — "Founding ML Engineer" Bengaluru
+  - {name: Kong,                ats: ashby,           token: kong}                #  9 India /  2 pass — "Software Engineer 2" Bangalore
+  - {name: Handshake,           ats: ashby,           token: handshake}           #  9 India /  2 pass — "Forward Deployed Engineer I" India
+  - {name: Cartesia,            ats: ashby,           token: cartesia}            #  3 India /  2 pass — "Software Engineer, Platform" + FDE, Bangalore
+  - {name: SigNoz,              ats: ashby,           token: signoz}              # 16 India /  2 pass — Indian OSS observability, remote India
+  - {name: project44,           ats: greenhouse,      token: project44}           # 12 India /  2 pass — "Software Engineer - Backend" Bangalore
+  - {name: LiteLLM,             ats: ashby,           token: litellm}             #  2 India /  1 pass — "Forward Deployed Engineer - India"
+  - {name: Cursor (Anysphere),  ats: ashby,           token: cursor}              #  5 India /  1 pass — "Field Engineer - India"
+  - {name: LiveKit,             ats: ashby,           token: livekit}             #  1 India /  1 pass — "Forward Deployed Engineer" remote India
+  - {name: Orbital,             ats: ashby,           token: withorbital}         #  6 India /  1 pass — "Software Engineer" Hyderabad
+  - {name: Applied Intuition,   ats: ashby,           token: applied}             #  1 India /  1 pass — "Software Engineer" Bangalore
+  - {name: Poshmark (Naver),    ats: ashby,           token: poshmark}            #  3 India /  1 pass — "Software Engineer II, Machine Learning" Chennai
+
+  #  Second pass over the same pile — 765 further boards scored, 5 kept.
+  #  The low yield is the point: passing title_include is necessary but not
+  #  sufficient, so every passing role was re-fetched and classified, and a board
+  #  ships only if at least one role is one worth taking. 18 boards
+  #  cleared the filter and 12 of them cleared it with nothing worth taking —
+  #  IT helpdesk, GTM ops, data-annotation gigs, Golang-only, customer success.
+  - {name: Truveta,             ats: greenhouse,      token: truveta}             # 18 India / 3 — SWE Backend + Full Stack + Infra, Hyderabad
+  - {name: Anyscale,            ats: ashby,           token: anyscale}            #  3 India / 3 — SWE Ray Core / Ray Data / Platform, Bengaluru
+  - {name: NxtWave,             ats: freshteam,       token: nxtwave}             # 22 India / 1 — "Full Stack Developer - 2", Hyderabad
+  - {name: Cognition (Devin),   ats: ashby,           token: cognition}           #  3 India / 1 — "Deployed Engineer", remote India (they acquired Windsurf)
+  - {name: HighLevel,           ats: lever,           token: gohighlevel}         # 61 India / 1 — "Full Stack Builder (Team of One)", India
   #  Checked and genuinely closed to us — the careers page runs on a platform
   #  with no public JSON, or the board is auth-walled:
   #    Cisco, Lowe's-content + Philips → Phenom People (content API only)

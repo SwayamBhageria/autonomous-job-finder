@@ -26,6 +26,7 @@ BATCH = 6
 # requirement sits a median 78% of the way into a JD, so a head-cut is precisely
 # the wrong cut. Rescue it the same way _plain does.
 DESC_SLICE = 1400
+_LEAD = "Experience required:"
 enabled = bool(API_KEY)
 
 _SCHEMA = {
@@ -44,10 +45,20 @@ _SCHEMA = {
 
 
 def _clip(desc: str) -> str:
-    """Trim a JD to the prompt slice, keeping the experience requirement."""
+    """Trim a JD to the prompt slice, leading with the experience requirement.
+
+    The lead is prepended whether or not the JD gets truncated. It used to be a
+    rescue for the head-cut only, which left the judge to find the bar itself in
+    any JD short enough to survive intact — and it does not reliably do that: the
+    requirement is one line in six paragraphs of team blurb, and roles asking
+    3-6 years were coming back at 85-90. Stating it up front costs ~40 chars and
+    turns the single most decisive fact in the document into the first thing read.
+    """
+    # `ats._plain` already prepends this line when a JD trips DESC_CAP, so
+    # prepending unconditionally printed it twice on every long JD.
+    lead = "" if desc.startswith(_LEAD) else fit.experience_line(desc)
     if len(desc) <= DESC_SLICE:
-        return desc
-    lead = fit.experience_line(desc)
+        return f"{lead} {desc}".strip() if lead else desc
     if not lead:
         return desc[:DESC_SLICE]
     return f"{lead} {desc[:DESC_SLICE - len(lead) - 1]}"
@@ -74,15 +85,42 @@ WHAT THEY WANT:
 - Resumes available: {prefs['two_resumes']}
 
 Score each role 0-100 for GENUINE fit + realistic conversion chance for THIS
-candidate (~1 yr experience). Be strict: a role needing 4+ yrs, or a Senior/
+candidate (~1 yr 3 mo experience). Be strict: a role needing 3+ yrs, or a Senior/
 Staff/Lead/Principal title, or a stack they don't have (Go/Rust/C++/.NET/mobile-
-native/SAP/Salesforce) should score LOW even if the title contains "engineer".
+native/SAP/Salesforce/RTL/firmware) should score LOW even if the title contains
+"engineer".
+
+HOW THE EXPERIENCE LINE FEEDS THE SCORE — read this carefully, it is the axis
+that gets mis-weighted in both directions. Anything with a stated floor of 3+
+years is dropped before it reaches you. SCORE AGAINST THE FLOOR — the FIRST
+number in "Experience required: N years" or "N-M years" — never the upper end:
+
+  * Floor of 0 or 1 ("1+ years", "0-2 years", "1-2", "1-3", "1-5") → a MATCH,
+    no penalty. The upper end is irrelevant and must not be read as the bar:
+    "1-3 years" is a one-year role that would also take someone more senior,
+    NOT a three-year role. The candidate is squarely eligible for these.
+
+  * Floor of exactly 2 ("2+ years", "minimum 2 years", "2-5 years") → a REAL
+    negative, not a token one. At ~1 yr the candidate is genuinely under the stated
+    basic qualification and their realistic chance of being accepted drops. Mark
+    it down properly and say so in the reason.
+
+  * A strong stack/role match still rescues it. A floor of 2 is a reason to
+    RANK a role lower, not to score it out on its own — an excellent match at
+    2 years is still worth applying to, and should still clear the bar.
+
+(Both failures are measured on real sweeps of the same 1274 matches. Treating 2
+as disqualifying cost 30 good roles in one sweep, two of them already applied
+to. Treating 2 as free lost the intended ordering. The floor/upper-end
+distinction is what makes the difference: penalise a floor of 2, never penalise
+a "1-3" for containing a 3, and never penalise a "0-2" for containing a 2.)
 A listing marked [PARTIAL LISTING] is a teaser or a JD we failed to fetch, not the
 real thing — its requirements are UNKNOWN, so score it no higher than 65 and say
 "unverified JD" in the reason. (65, not 70: 70 is the A-tier referral bar, so a
 ceiling of 70 put every unread role on it. The ceiling must sit strictly below.)
 Absence of a stated requirement is not evidence the role is junior.
-If the text opens with "Experience required: N years", treat N as authoritative.
+If the text opens with "Experience required: N years" (or "N-M years"), treat
+that as authoritative and score against N, the floor.
 Reward strong full-stack (Angular/React/TS/Node/Python/FastAPI) and applied-AI/
 LLM roles at their level. Forward-deployed engineering (FDE / deployed engineer /
 implementation / delivery-side engineering that BUILDS) is wanted EXACTLY as much

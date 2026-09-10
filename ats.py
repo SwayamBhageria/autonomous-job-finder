@@ -16,6 +16,7 @@ import html
 import time
 import random
 import threading
+import collections
 import urllib.parse
 import concurrent.futures as cf
 import requests
@@ -53,7 +54,87 @@ def _origin(url: str) -> str:
     return f"{p.scheme}://{p.netloc}/"
 
 
-def _check_pages(company: str, failed: int, total: int, got: int) -> None:
+class BoardUnavailable(RuntimeError):
+    """The vendor says this board is down right now — not our failure to read it.
+
+    Distinct from a plain error because the two want opposite handling. An error
+    means *we* could not read a board that is up, and should count against it:
+    three in a row is a dead board and worth a Slack alert. A vendor maintenance
+    window is neither our bug nor actionable — on 2026-08-15 Workday took pods
+    wd1/wd3/wd5 down together and 63 of 65 boards went with them, which under
+    plain-error handling would have alerted naming 8 companies at random out of
+    the 63, every day the window lasted.
+
+    What it must NOT become is a success. A board in maintenance returns no jobs,
+    and `poller.fetch_one` keeps it out of `fetched_ok`/`healthy`/`board_counts`
+    exactly as it would an error — because a board with no jobs on it cannot
+    testify that a role is gone, and revalidate() would otherwise read the empty
+    result as "every role at these 63 companies has been pulled".
+    """
+
+
+# ── Did we see the WHOLE board, or a sample of it? ────────────
+# `healthy` in the poller means "this board answered and had jobs on it", and
+# revalidate() treats that as authority to declare a tracked role dead when the
+# role is absent. That inference is only sound if the fetch enumerated the board
+# *exhaustively*, and for the query-and-page adapters it usually did not:
+#
+#   Qualcomm  99 of 577 India roles reachable (pcsx asked for 50-job pages and
+#             the API silently serves 10, so start=0,50,100 read ranks 0-9,
+#             50-59, 100-109 — 30 of 577 per query, skipping 40 in every 50)
+#   Citi      60 of 1042 (workday: 3 pages x limit 20, relevance-ranked)
+#
+# A role outside that window is indistinguishable from a role that was pulled,
+# and the cockpit believed the second: an 85-scored Qualcomm "Engineer" alerted
+# 2026-08-18 13:10 was flagged "⚠️ Posting gone" and dropped out of the To-do
+# and To-apply views seven runs later, while both its requisitions were still
+# listed. So an adapter that knows it sampled says so here, and revalidate()
+# declines to count a miss against it. Absence of evidence, from a board we only
+# skimmed, is not evidence of absence.
+_PARTIAL: dict[str, str] = {}
+_PARTIAL_LOCK = threading.Lock()
+
+
+def reset_coverage() -> None:
+    """Forget last run's coverage. Called once per poll, before any fetch."""
+    with _PARTIAL_LOCK:
+        _PARTIAL.clear()
+
+
+def mark_partial(company: str, why: str) -> None:
+    """Record that this board was sampled, not enumerated. First reason wins."""
+    with _PARTIAL_LOCK:
+        _PARTIAL.setdefault(company.lower(), why)
+
+
+def partial_boards() -> dict[str, str]:
+    """{company: why} for boards this run only skimmed."""
+    with _PARTIAL_LOCK:
+        return dict(_PARTIAL)
+
+
+def _short_walk(rows: int, total: int | None) -> bool:
+    """Did a walk that ran until the board said "no more" still end far short?
+
+    The empty page is the board's own statement that it is exhausted, so it is
+    positive evidence and outranks the count. `total` is a page-1 snapshot and
+    does not have to agree exactly: Oracle's board reports 225 India rows and
+    serves 224 on every run, and pcsx's `count` moves 575 → 577 mid-walk as
+    postings come and go. Demanding exact agreement marks such a board partial
+    *permanently*, which switches its closure detection off for good — the same
+    silent, self-inflicted damage this whole mechanism exists to prevent, and
+    the second time that trap has been walked into (see pcsx's row-vs-job note).
+
+    So tolerate a small shortfall and catch only a gross one: a walk that ends
+    at 40 of 500 did not finish, it broke.
+    """
+    if not total:
+        return False
+    return rows + 3 < total and rows < total * 0.95
+
+
+def _check_pages(company: str, failed: int, total: int, got: int,
+                 why: str = "") -> None:
     """Raise if every list request failed; warn if only some did.
 
     The paged adapters below fan a board out into (query × page) sub-requests
@@ -77,12 +158,113 @@ def _check_pages(company: str, failed: int, total: int, got: int) -> None:
     common, recoverable on the next run, and raising would take a board that
     returned 90% of its jobs out of `healthy` — which would then make
     revalidate() believe live roles had been pulled.
+
+    `why` carries the most common reason, when the caller kept it. Without it
+    the recorded error is only a count, which is what board_health held on
+    2026-08-15 when 63 of 65 Workday boards died at once: "all 18/18 list
+    requests failed" for every one of them, and nothing anywhere saying that
+    every request had come back HTTP 200 with Workday's maintenance page.
     """
     if failed and not got:
-        raise RuntimeError(f"all {failed}/{total} list requests failed")
+        raise RuntimeError(f"all {failed}/{total} list requests failed{why}")
     if failed:
+        # Deliberately still a success for supply purposes — see the docstring
+        # above on why raising here would be worse. But the jobs behind those
+        # failed pages are missing from `live_urls`, and without this the roles
+        # they hold get counted as pulled. That is the same hole the sampling
+        # comment above describes, arriving by a different route.
+        mark_partial(company, f"{failed}/{total} list requests failed")
         print(f"  ⚠️ {company}: {failed}/{total} list requests failed, "
               f"{got} job(s) returned — some may be missing")
+
+
+# Workday's maintenance page says "Workday is currently unavailable" in its
+# <title>, and links out to community.workday.com/maintenance-page. Matched on
+# the body rather than the status, because it is served as a 200 — see below.
+#
+# Oracle Fusion words it differently and serves it as a 503: <title>Planned
+# Outage</title> over "currently undergoing scheduled maintenance". Neither
+# Workday mark appears anywhere in it, so before this was added JPMorgan's pod
+# going down on 2026-08-15 classified as TRANSIENT — which by design never
+# establishes a window on its own — and the board alerted for two runs with
+# "all 6/6 list requests failed" and no reason attached.
+_MAINTENANCE_MARKS = ("currently unavailable", "maintenance-page",
+                      "scheduled maintenance", "planned outage")
+
+
+# Statuses that are consistent with a pod being down, as opposed to one that is
+# up and refusing us. 429 and 403 are deliberately NOT here: they mean the
+# tenant is serving other people fine and throttling or blocking this client,
+# which is our problem to know about and must never be filed under "maintenance".
+_POD_DOWN_STATUS = {500, 502, 503, 504}
+
+MAINTENANCE, TRANSIENT, OTHER = "maintenance", "transient", "other"
+
+
+def _list_failure(exc: Exception,
+                  r: requests.Response | None) -> tuple[str, str]:
+    """Why one list request failed, and which of three kinds of failure it is.
+
+    A 200 carrying HTML is the case worth naming. `_fetch_list` only retries
+    the statuses in `_RETRY_STATUS`, so a maintenance page — which Workday
+    serves as 200 text/html — sails through raise_for_status() and only blows
+    up later on .json(). The caller sees a JSONDecodeError and no status at
+    all, so "failed" reads as "the request errored" when the truth is "the
+    pod is down and told us so in HTML".
+
+    The three kinds exist because a pod in maintenance does not fail uniformly.
+    On 2026-08-15 the first cut of this demanded that *every* failure be a
+    recognised maintenance page, and 6 of 63 boards fell to the error path
+    anyway — with "vendor maintenance page" as their own recorded reason —
+    because a handful of their 18 requests had timed out or exhausted the retry
+    on a 5xx while the pod was restarting, which leaves no response to read at
+    all. Same outage, different bucket, decided by a coin flip.
+
+    So `TRANSIENT` covers the collateral (timeouts, resets, 5xx) that a pod
+    going down produces alongside the page, and it is only ever allowed to ride
+    along with a positive `MAINTENANCE` sighting — never to establish one on its
+    own. `OTHER` is everything unrecognised, including 429/403, and always keeps
+    the board on the error path: a broad "probably fine" would be the
+    invisible-loss bug this module keeps re-learning.
+    """
+    resp = r if r is not None else getattr(exc, "response", None)
+    if resp is not None:
+        ctype = (resp.headers.get("content-type") or "?").split(";")[0]
+        if "json" not in ctype.lower():
+            head = resp.text[:4000].lower()
+            if any(m in head for m in _MAINTENANCE_MARKS):
+                return (f"HTTP {resp.status_code} {ctype} "
+                        f"(vendor maintenance page)"), MAINTENANCE
+            kind = TRANSIENT if resp.status_code in _POD_DOWN_STATUS else OTHER
+            return f"HTTP {resp.status_code} {ctype} (non-JSON body)", kind
+        kind = TRANSIENT if resp.status_code in _POD_DOWN_STATUS else OTHER
+        return f"HTTP {resp.status_code} ({type(exc).__name__})", kind
+    kind = TRANSIENT if isinstance(
+        exc, (requests.Timeout, requests.ConnectionError)) else OTHER
+    return f"{type(exc).__name__}: {exc}"[:120], kind
+
+
+def _list_outcome(company: str, fails: list[tuple[str, str]],
+                  total: int, got: int) -> None:
+    """Decide what a fanned-out board fetch amounts to: fine, warn, or raise.
+
+    Shared by every paged adapter rather than copied into each, because the
+    condition below is subtle enough that two copies would drift — and the way
+    this goes wrong is silent in both directions.
+    """
+    reasons = [r for r, _ in fails]
+    kinds = {k for _, k in fails}
+    why = f" — {collections.Counter(reasons).most_common(1)[0][0]}" if fails else ""
+    # Nothing came back, the vendor's own "we are down" page was seen at least
+    # once, and nothing else suggests a board that is up and refusing us. The
+    # collateral of a pod going down (timeouts, resets, 5xx) is allowed to ride
+    # along, but never to establish the window by itself — one positive sighting
+    # is required, and a single OTHER (429, 403, an unrecognised body) is enough
+    # to keep the board on the error path. A board that returned any jobs at all
+    # is not in a window and is handled by _check_pages below.
+    if not got and MAINTENANCE in kinds and not (kinds - {MAINTENANCE, TRANSIENT}):
+        raise BoardUnavailable(f"all {len(fails)}/{total} list requests{why}")
+    _check_pages(company, len(fails), total, got, why)
 
 
 # ── Per-host politeness, for the DETAIL fetch only ────────────
@@ -222,10 +404,28 @@ def _get_detail_text(url: str) -> str:
 
 
 def _get_text(url: str) -> str:
-    """Same as _get for boards whose detail page is HTML, not JSON."""
-    r = requests.get(url, headers=HEADERS, timeout=TIMEOUT)
-    r.raise_for_status()
-    return r.text
+    """Same as `_get` for boards whose LIST page is HTML, not JSON.
+
+    Goes through `_fetch_list`, so it gets the per-host slot and — the part that
+    matters — the same 4-attempt backoff every other fetcher in this file has.
+    It used to be a bare `requests.get` with `raise_for_status()`: no throttle,
+    no retry, so **one** blip marked the board failed for the whole run.
+
+    That is not hypothetical. Its only caller is `freshteam()`, and on
+    2026-08-26..28 all ten Freshteam tenants flap-alerted together for three
+    days — "failed 8 of the last 12 runs" — with `502 Bad Gateway` and
+    `Read timed out (read timeout=25)`. Both of those are in `_RETRY_STATUS` /
+    the caught-exception set that `_fetch_list` has always waited out for
+    everyone else; this one path just never got the treatment. The boards were
+    never down: probed sequentially all ten answer 200 in 0.5-1.4s, and the
+    poller's 10-wide board pool hits them together because eight of them sit on
+    consecutive lines in companies.yaml.
+
+    It does not reproduce from a home IP (30/30 clean, 10-wide, three trials) —
+    CI runs on shared Azure ranges that get rate-limited on reputation, which is
+    why the retry rather than the throttle is what carries the weight here.
+    """
+    return _fetch_list("GET", url).text
 
 
 def _plain(text: str) -> str:
@@ -366,56 +566,112 @@ WORKDAY_QUERIES = [
     "machine learning engineer India",
     "India",   # some tenants (Expedia wd108) AND multi-word queries to zero
 ]
-WORKDAY_MAX_PAGES = 3        # per query → up to 60 top-ranked results each
+# Pages per query, at Workday's hard limit of 20 a page (25 and 50 are a 400).
+# Was 3 — 60 top-ranked results per query — which left 39 of the 65 boards
+# truncated and only 3,149 of 9,667 India postings reachable. At 25 (500 a
+# query) every board clears except Citi (1,041) and Amgen (974), and those two
+# mark themselves partial below rather than pretending to be complete. Only the
+# boards that are actually deep pay for the extra pages: the walk is bounded by
+# each query's own `total`, so a 51-role board still costs three requests.
+WORKDAY_MAX_PAGES = 25
 
 
 def workday(company: str, host: str, tenant: str, site: str) -> list[dict]:
     """Workday cxs API. Runs a handful of targeted India+role searches (cheap)
     instead of paging the whole board, dedupes across them by job path. The JD
-    is fetched lazily per candidate via enrich_description()."""
+    is fetched lazily per candidate via enrich_description().
+
+    "Instead of paging the whole board" is a deliberate trade — and the cost of
+    it has to be declared, or revalidate() reads this board's silence as proof.
+    Measured across all 65 Workday boards on 2026-08-19: 9,667 India postings
+    exist, 3,149 are reachable at 3 pages x 20, and 39 of the 65 boards are
+    truncated (Citi 60 of 1042, Amgen 60 of 979, ABB 60 of 439). So the board
+    reports its own `total` below and says when it only skimmed.
+
+    Paging deeper is a separate change with its own hazards, all measured here
+    so they are not rediscovered: `limit` above 20 is a 400, `total` is only
+    populated on the offset=0 response, and past the end Workday WRAPS — offset
+    1060/1200/2000 on Citi each return 20 already-seen rows rather than an empty
+    page, so "page until empty" would never terminate.
+    """
     base = f"https://{host}/wday/cxs/{tenant}/{site}"
+
+    fails: list[tuple[str, str]] = []    # (why, kind) per failed request
+    totals: dict[str, int] = {}          # query → the board's own India count
 
     def page(query: str, offset: int) -> list | None:
         """Postings for one (query, page), or None if the request itself failed."""
+        r = None
         try:
             r = _fetch_list("POST", f"{base}/jobs",
                             json={"limit": 20, "offset": offset,
                                   "searchText": query, "appliedFacets": {}})
-            return r.json().get("jobPostings", [])
-        except Exception:
+            d = r.json()
+            # Only the first page carries a real total; deeper offsets report 0.
+            if not offset and isinstance(d.get("total"), int):
+                totals[query] = d["total"]
+            return d.get("jobPostings", [])
+        except Exception as e:
+            fails.append(_list_failure(e, r))
             return None
 
-    # fire every (query, page) request in parallel — bounded and fast
-    tasks = [(q, pg * 20) for q in WORKDAY_QUERIES for pg in range(WORKDAY_MAX_PAGES)]
     seen: dict[str, dict] = {}
-    failed = 0
-    with cf.ThreadPoolExecutor(max_workers=8) as ex:
-        for posts in ex.map(lambda t: page(*t), tasks):
-            if posts is None:
-                failed += 1
+
+    def absorb(posts: list | None) -> None:
+        if posts is None:
+            return
+        for j in posts:
+            path = j.get("externalPath", "")
+            if not path or path in seen:
                 continue
-            for j in posts:
-                path = j.get("externalPath", "")
-                if not path or path in seen:
-                    continue
-                loc = j.get("locationsText", "")
-                if not loc:
-                    # some tenants (Thomson Reuters) omit locationsText; the
-                    # path segment carries it: /job/India-Bengaluru-Karnataka/…
-                    parts = path.split("/")
-                    loc = parts[2].replace("-", " ") if len(parts) > 3 else ""
-                seen[path] = {
-                    "id": path,
-                    "company": company,
-                    "title": j.get("title", ""),
-                    "location": loc,
-                    "url": f"https://{host}/en-US/{site}{path}",
-                    "department": "",
-                    "description": "",                   # filled lazily
-                    "_detail": f"{base}{path}",          # cxs detail endpoint
-                    "source": "workday",
-                }
-    _check_pages(company, failed, len(tasks), len(seen))
+            loc = j.get("locationsText", "")
+            if not loc:
+                # some tenants (Thomson Reuters) omit locationsText; the
+                # path segment carries it: /job/India-Bengaluru-Karnataka/…
+                parts = path.split("/")
+                loc = parts[2].replace("-", " ") if len(parts) > 3 else ""
+            seen[path] = {
+                "id": path,
+                "company": company,
+                "title": j.get("title", ""),
+                "location": loc,
+                "url": f"https://{host}/en-US/{site}{path}",
+                "department": "",
+                "description": "",                   # filled lazily
+                "_detail": f"{base}{path}",          # cxs detail endpoint
+                "source": "workday",
+            }
+
+    # Phase 1 — one page per query, which is also how `total` is learned: only
+    # the offset=0 response carries it (deeper offsets report 0).
+    with cf.ThreadPoolExecutor(max_workers=8) as ex:
+        for posts in ex.map(lambda q: page(q, 0), WORKDAY_QUERIES):
+            absorb(posts)
+
+    # Phase 2 — walk each query out to its own total, bounded by the budget.
+    # Offsets are derived from `total` and never reach it, which is what keeps
+    # the walk out of the wrap-around region past the end of the result set.
+    # A query whose total we never learned falls back to the old fixed depth.
+    deep: list[tuple[str, int]] = []
+    for q in WORKDAY_QUERIES:
+        end = totals.get(q)
+        end = min(end, WORKDAY_MAX_PAGES * 20) if end is not None else 3 * 20
+        deep += [(q, off) for off in range(20, end, 20)]
+    with cf.ThreadPoolExecutor(max_workers=8) as ex:
+        for posts in ex.map(lambda t: page(*t), deep):
+            absorb(posts)
+
+    _list_outcome(company, fails, len(WORKDAY_QUERIES) + len(deep), len(seen))
+    # Where a query has more India postings than the budget reads, the roles
+    # past the window are unread, not withdrawn, and revalidate() must not be
+    # allowed to count them as pulled.
+    reach = WORKDAY_MAX_PAGES * 20
+    over = max((t for t in totals.values() if t > reach), default=0)
+    missing = [q for q in WORKDAY_QUERIES if q not in totals]
+    if over:
+        mark_partial(company, f"read {reach} of {over} on the deepest query")
+    elif missing:
+        mark_partial(company, f"no total reported for {len(missing)} query(s)")
     return list(seen.values())
 
 
@@ -475,55 +731,76 @@ def eightfold(company: str, token: str) -> list[dict]:
     return out
 
 
-AMAZON_QUERIES = [
-    "software development engineer",
-    "front end engineer",
-    "full stack",
-    "machine learning engineer",
-    "applied scientist",
-]
+# No keyword queries, for the same reason as google() below: `base_query=""`
+# with `country=IND` returns the whole India board — 2,595 roles — and each of
+# the five keyword searches this replaced is a strict SUBSET of it. Walked in
+# full they came to 292 / 1 / 35 / 4 / 78, and contributed **zero** ids the
+# query-less walk does not already hold. The adapter was reading 208 of 2,595.
+AMAZON_PAGE = 100            # `result_limit` the API honours
+AMAZON_MAX_PAGES = 60        # x 100 — a runaway guard, not a budget
 
 
 def amazon(company: str, token: str) -> list[dict]:
-    """amazon.jobs public search JSON, India-scoped. Recent-first, one page
-    (100) per query — new postings always surface. JD is in the list payload."""
-    seen: dict[str, dict] = {}
+    """amazon.jobs public search JSON, India-scoped. JD is in the list payload.
 
-    def page(query: str) -> list | None:
-        """Jobs for one query, or None if the request itself failed."""
+    Walked to the end rather than sampled: `hits` reports the India total and
+    `offset` pages cleanly to it (292 → 292 on the old widest query, then an
+    empty page), so there is no reason to stop at the first 100.
+    """
+    seen: dict[str, dict] = {}
+    total: int | None = None
+
+    def page(offset: int) -> list | None:
+        """One page of India jobs, or None if the request itself failed."""
+        nonlocal total
         try:
             d = _fetch_list("GET", "https://www.amazon.jobs/en/search.json"
-                            f"?base_query={urllib.parse.quote(query)}"
-                            "&country=IND&result_limit=100&offset=0&sort=recent").json()
+                            f"?base_query=&country=IND&result_limit={AMAZON_PAGE}"
+                            f"&offset={offset}&sort=recent").json()
+            if isinstance(d.get("hits"), int):
+                total = d["hits"]
             return d.get("jobs", [])
         except Exception:
             return None
 
-    failed = 0
-    with cf.ThreadPoolExecutor(max_workers=5) as ex:
-        for jobs in ex.map(page, AMAZON_QUERIES):
-            if jobs is None:
-                failed += 1
+    failed, rows, pages, capped = 0, 0, 0, False
+    while True:
+        if pages >= AMAZON_MAX_PAGES:
+            capped = True
+            break
+        jobs = page(rows)
+        pages += 1
+        if jobs is None:                      # request failed — a hole, not an end
+            failed += 1
+            break
+        if not jobs:                          # the board says there is no more
+            break
+        rows += len(jobs)
+        for j in jobs:
+            jid = str(j.get("id", ""))
+            if not jid or jid in seen:
                 continue
-            for j in jobs:
-                jid = str(j.get("id", ""))
-                if not jid or jid in seen:
-                    continue
-                jd = " ".join(filter(None, (
-                    j.get("description", ""),
-                    j.get("basic_qualifications", ""),
-                    j.get("preferred_qualifications", ""))))
-                seen[jid] = {
-                    "id": jid,
-                    "company": company,
-                    "title": j.get("title", ""),
-                    "location": j.get("normalized_location") or j.get("location", ""),
-                    "url": f"https://www.amazon.jobs{j.get('job_path', '')}",
-                    "department": j.get("job_category", "") or "",
-                    "description": _plain(jd),
-                    "source": "amazon",
-                }
-    _check_pages(company, failed, len(AMAZON_QUERIES), len(seen))
+            jd = " ".join(filter(None, (
+                j.get("description", ""),
+                j.get("basic_qualifications", ""),
+                j.get("preferred_qualifications", ""))))
+            seen[jid] = {
+                "id": jid,
+                "company": company,
+                "title": j.get("title", ""),
+                "location": j.get("normalized_location") or j.get("location", ""),
+                "url": f"https://www.amazon.jobs{j.get('job_path', '')}",
+                "department": j.get("job_category", "") or "",
+                "description": _plain(jd),
+                "source": "amazon",
+            }
+    _check_pages(company, failed, pages, len(seen))
+    if failed:
+        pass                                  # _check_pages already marked it
+    elif capped:
+        mark_partial(company, f"page cap {AMAZON_MAX_PAGES} hit at {len(seen)} jobs")
+    elif _short_walk(rows, total):
+        mark_partial(company, f"read {rows} of {total} India rows listed")
     return list(seen.values())
 
 
@@ -578,65 +855,110 @@ def uber(company: str, token: str) -> list[dict]:
     return out
 
 
-ORACLE_QUERIES = [
-    "software engineer India",
-    "full stack India",
-    "machine learning India",
-]
+ORACLE_PAGE = 100            # `limit` the CE API honours
+ORACLE_MAX_PAGES = 40        # x 100 — a runaway guard, not a budget
 
 
 def oracle(company: str, host: str, site: str) -> list[dict]:
     """Oracle Cloud Recruiting (HCM) public CE API — used by JPMorgan Chase etc.
-    Targeted keyword searches like the Workday adapter; JD text ships in the
-    list payload (short description + responsibilities + qualifications)."""
+    JD text ships in the list payload (short description + responsibilities +
+    qualifications).
+
+    ── `location=India`, not the word "India" in a keyword ──
+    This used to run three keyword searches — "software engineer India", "full
+    stack India", "machine learning India" — two pages each. "India" in a
+    free-text keyword is not a location filter, and the API never said so: it
+    answered 200 with a relevance/recency mix in which **61 of the first 100
+    results for "software engineer India" were United States, United Kingdom
+    and Singapore**. So most of the page budget was spent fetching roles the
+    location filter downstream would throw away, and the India roles that did
+    exist were mostly past the cut.
+
+    `location=India` is a real filter and the numbers say so plainly — for
+    JPMorgan it reports 439 and returns 100 India out of 100, against 1381 and
+    22 out of 100 for the keyword. Checked on every tenant: JPMorgan 439,
+    Honeywell 313, Oracle 225, Amex 70, Akamai 17, Dell 16 — 1,080 India roles,
+    each walkable to the end in five pages or fewer.
+
+    Two nearby params were tried and rejected by measurement rather than by
+    reading: `locationId` is silently IGNORED (it returns the unfiltered 7,388
+    global board, the same as sending no filter at all), and
+    `selectedCountriesFacet` is a 400. Only `location` works, so only `location`
+    is used — and `TotalJobsCount` is asserted against what we walked.
+    """
     # expand= is required — without it the requisitionList child is omitted
     base = (f"https://{host}/hcmRestApi/resources/latest/recruitingCEJobRequisitions"
             f"?onlyData=true&expand=requisitionList.secondaryLocations"
-            f"&finder=findReqs;siteNumber={site},sortBy=POSTING_DATES_DESC")
+            f"&finder=findReqs;siteNumber={site},location=India"
+            f",sortBy=POSTING_DATES_DESC")
 
-    def page(query: str, offset: int) -> list | None:
-        """Requisitions for one (query, page), or None if the request failed."""
+    fails: list[tuple[str, str]] = []    # (why, kind) per failed request
+    total: int | None = None
+
+    def page(offset: int) -> list | None:
+        """One page of India requisitions, or None if the request failed."""
+        nonlocal total
+        r = None
         try:
-            d = _fetch_list(
-                "GET", f"{base},keyword={urllib.parse.quote_plus(query)},limit=100,offset={offset}").json()
+            r = _fetch_list("GET", f"{base},limit={ORACLE_PAGE},offset={offset}")
+            d = r.json()
             items = d.get("items", [])
-            return items[0].get("requisitionList", []) if items else []
-        except Exception:
+            if not items:
+                return []
+            if isinstance(items[0].get("TotalJobsCount"), int):
+                total = items[0]["TotalJobsCount"]
+            return items[0].get("requisitionList", [])
+        except Exception as e:
+            fails.append(_list_failure(e, r))
             return None
 
-    tasks = [(q, pg * 100) for q in ORACLE_QUERIES for pg in range(2)]
     seen: dict[str, dict] = {}
-    failed = 0
-    with cf.ThreadPoolExecutor(max_workers=6) as ex:
-        for reqs in ex.map(lambda t: page(*t), tasks):
-            if reqs is None:
-                failed += 1
+    offset, pages, capped = 0, 0, False
+    while True:
+        if pages >= ORACLE_MAX_PAGES:
+            capped = True
+            break
+        reqs = page(offset)
+        pages += 1
+        if reqs is None:                     # request failed — a hole, not an end
+            break
+        if not reqs:                         # the board says there is no more
+            break
+        offset += len(reqs)
+        for j in reqs:
+            jid = str(j.get("Id", ""))
+            if not jid or jid in seen:
                 continue
-            for j in reqs:
-                jid = str(j.get("Id", ""))
-                if not jid or jid in seen:
-                    continue
-                locs = [j.get("PrimaryLocation", "")] + [
-                    s.get("Name", "") for s in j.get("secondaryLocations", [])]
-                jd = " ".join(filter(None, (
-                    j.get("ShortDescriptionStr", ""),
-                    j.get("ExternalResponsibilitiesStr", ""),
-                    j.get("ExternalQualificationsStr", ""))))
-                seen[jid] = {
-                    "id": jid,
-                    "company": company,
-                    "title": j.get("Title", ""),
-                    "location": "; ".join(filter(None, locs)),
-                    "url": f"https://{host}/hcmUI/CandidateExperience/en/sites/{site}/job/{jid}",
-                    "department": j.get("JobFamily", "") or "",
-                    # list JD is often just a teaser — full JD fetched lazily
-                    "description": _plain(jd) if len(jd) > 400 else "",
-                    "_detail": (f"https://{host}/hcmRestApi/resources/latest/"
-                                f"recruitingCEJobRequisitionDetails?expand=all&onlyData=true"
-                                f"&finder=ById;siteNumber={site},Id={jid}"),
-                    "source": "oracle",
-                }
-    _check_pages(company, failed, len(tasks), len(seen))
+            locs = [j.get("PrimaryLocation", "")] + [
+                s.get("Name", "") for s in j.get("secondaryLocations", [])]
+            jd = " ".join(filter(None, (
+                j.get("ShortDescriptionStr", ""),
+                j.get("ExternalResponsibilitiesStr", ""),
+                j.get("ExternalQualificationsStr", ""))))
+            seen[jid] = {
+                "id": jid,
+                "company": company,
+                "title": j.get("Title", ""),
+                "location": "; ".join(filter(None, locs)),
+                "url": f"https://{host}/hcmUI/CandidateExperience/en/sites/{site}/job/{jid}",
+                "department": j.get("JobFamily", "") or "",
+                # list JD is often just a teaser — full JD fetched lazily
+                "description": _plain(jd) if len(jd) > 400 else "",
+                "_detail": (f"https://{host}/hcmRestApi/resources/latest/"
+                            f"recruitingCEJobRequisitionDetails?expand=all&onlyData=true"
+                            f"&finder=ById;siteNumber={site},Id={jid}"),
+                "source": "oracle",
+            }
+
+    _list_outcome(company, fails, pages, len(seen))
+    # `offset` counts ROWS READ, which is what the board's own total is in —
+    # `seen` is deduped and would read short on a board that repeats a listing.
+    if fails:
+        pass                                  # _list_outcome already marked it
+    elif capped:
+        mark_partial(company, f"page cap {ORACLE_MAX_PAGES} hit at {len(seen)} jobs")
+    elif _short_walk(offset, total):
+        mark_partial(company, f"read {offset} of {total} India rows listed")
     return list(seen.values())
 
 
@@ -929,8 +1251,13 @@ def enrich_description(job: dict) -> None:
 
 
 GOOGLE_BASE = "https://www.google.com/about/careers/applications"
-GOOGLE_QUERIES = ["software engineer", "full stack", "machine learning", "frontend", "backend"]
-GOOGLE_MAX_PAGES = 3          # 20 cards a page
+# No keyword queries. `q=""` with `location=India` returns the whole India
+# board — 304 roles — and every one of the five keyword searches this used to
+# run is a strict SUBSET of it: walked in full, "software engineer" (163),
+# "full stack" (87), "machine learning" (74), "frontend" (12) and "backend"
+# (19) contributed **zero** ids the query-less walk does not already have.
+# Deduped they came to 133 of 304, because each was capped at three pages.
+GOOGLE_MAX_PAGES = 60         # 20 cards a page — a runaway guard, not a budget
 
 # id, slug and title arrive together on the "Learn more" anchor — the only
 # place in Google's markup where the three are unambiguously paired.
@@ -968,49 +1295,56 @@ def google(company: str, token: str) -> list[dict]:
         except Exception:
             return None
 
-    tasks = [(q, pg) for q in GOOGLE_QUERIES for pg in range(1, GOOGLE_MAX_PAGES + 1)]
-    failed = 0
-    with cf.ThreadPoolExecutor(max_workers=8) as ex:
-        for body in ex.map(lambda t: page(*t), tasks):
-            if body is None:
-                failed += 1
+    # Walked in order rather than fanned out, because the terminator is the
+    # first page with no cards on it and that is only knowable in sequence.
+    pg, failed, capped = 1, 0, False
+    while True:
+        if pg > GOOGLE_MAX_PAGES:
+            capped = True
+            break
+        body = page("", pg)
+        if body is None:                      # request failed — a hole, not an end
+            failed += 1
+            break
+        marks = list(_G_CARD.finditer(body))
+        if not marks:                         # the board says there is no more
+            break
+        for i, m in enumerate(marks):
+            jid, slug, title = m.group(1), m.group(2), html.unescape(m.group(3)).strip()
+            if jid in seen:
                 continue
-            if not body:
-                continue
-            marks = list(_G_CARD.finditer(body))
-            for i, m in enumerate(marks):
-                jid, slug, title = m.group(1), m.group(2), html.unescape(m.group(3)).strip()
-                if jid in seen:
-                    continue
-                # a card's body is the markup between the previous card's
-                # anchor and this one's
-                chunk = body[marks[i - 1].end() if i else 0:m.start()]
-                locs = dict.fromkeys(l.strip() for l in _G_LOC.findall(chunk))
-                quals = " ".join(_TAG.sub(" ", q) for q in _G_QUAL.findall(chunk))
-                seen[jid] = {
-                    "id": jid,
-                    "company": company,
-                    "title": title,
-                    "location": "; ".join(locs),
-                    "url": f"{GOOGLE_BASE}/jobs/results/{jid}-{slug}",
-                    "department": "",
-                    "description": _plain(html.unescape(quals)),
-                    "source": "google",
-                }
-    _check_pages(company, failed, len(tasks), len(seen))
+            # a card's body is the markup between the previous card's
+            # anchor and this one's
+            chunk = body[marks[i - 1].end() if i else 0:m.start()]
+            locs = dict.fromkeys(l.strip() for l in _G_LOC.findall(chunk))
+            quals = " ".join(_TAG.sub(" ", q) for q in _G_QUAL.findall(chunk))
+            seen[jid] = {
+                "id": jid,
+                "company": company,
+                "title": title,
+                "location": "; ".join(locs),
+                "url": f"{GOOGLE_BASE}/jobs/results/{jid}-{slug}",
+                "department": "",
+                "description": _plain(html.unescape(quals)),
+                "source": "google",
+            }
+        pg += 1
+    _check_pages(company, failed, pg, len(seen))
+    if capped:
+        mark_partial(company, f"page cap {GOOGLE_MAX_PAGES} hit at {len(seen)} jobs")
     return list(seen.values())
 
 
-PCSX_QUERIES = [
-    "software engineer",
-    "full stack developer",
-    "machine learning engineer",
-    "frontend engineer",
-    "backend engineer",
-    "engineer",          # broad catch — the narrow queries miss ~80% of the board
-]
-PCSX_PAGE = 50               # the API caps a page around here
-PCSX_MAX_PAGES = 3
+# The API serves 10 results a page and there is no parameter that widens it —
+# `num`, `size`, `pageSize`, `limit`, `rows`, `perPage` and `hits` were all
+# tried and all return 10. This constant is therefore an OBSERVATION, not a
+# request: it is here so the stride below can be sanity-checked against it, and
+# the walk advances by what each page actually returned rather than by this.
+PCSX_PAGE = 10
+# 577 India roles at Qualcomm, 10 a page — so the cap is a runaway guard, not a
+# budget. It sits far above any real board; hitting it means the terminator
+# broke, and the board is marked partial rather than quietly truncated.
+PCSX_MAX_PAGES = 200
 
 
 def pcsx(company: str, host: str, domain: str) -> list[dict]:
@@ -1034,49 +1368,97 @@ def pcsx(company: str, host: str, domain: str) -> list[dict]:
     The JD is fetched lazily: the per-job `/api/apply/v2/jobs/{id}` DETAIL
     endpoint is not 403-blocked (only the list is) and returns `job_description`
     at the top level, which enrich_description()'s eightfold branch already reads.
+
+    ── Enumerate the board; do not sample it ──
+    This used to fire six role queries at three pages of a requested 50, and
+    read 99 of Qualcomm's 577 India roles. Two things were wrong with that.
+
+    `num` is ignored: the API serves 10 whatever you ask for, so `start` values
+    of 0/50/100 sampled ranks 0-9, 50-59 and 100-109 and skipped 40 in every 50.
+    Nothing noticed, because 18 requests returned 18 pages of jobs and every
+    check asked whether a request had *failed*. The count that reached
+    board_supply was rock-steady — 102, 100, 101, 103, 100, 101, 93, 99 — which
+    is what a stable sample of a moving board looks like, and is why the
+    supply-drop alarm never fired either.
+
+    And the queries were unnecessary: dropping `query` entirely returns the whole
+    India board (577) where the best single query returns 547. So there is one
+    walk, no queries, and the location filter is asserted rather than assumed —
+    `location=Antarctica` returns 0 and a misspelt parameter name returns the
+    1973-role global board, so a typo here would silently widen us worldwide.
+
+    The walk advances by the length of the page it just read, not by a fixed
+    stride, because `count` drifts while you are walking it (575 → 577 mid-walk,
+    observed). Striding by 10 against a shrinking `count` steps over the tail;
+    striding by what actually arrived cannot. `count` is therefore never a
+    terminator — an empty page is — and is used only to sanity-check the total.
     """
     base = f"https://{host}/api/pcsx/search"
     seen: dict[str, dict] = {}
 
-    def page(query: str, start: int) -> list:
+    def page(start: int) -> tuple[list | None, int | None]:
+        """One page from `start`, and the board's self-reported India total."""
         try:
-            url = (f"{base}?domain={urllib.parse.quote(domain)}&location=India"
-                   f"&start={start}&num={PCSX_PAGE}"
-                   f"&query={urllib.parse.quote_plus(query)}")
+            url = (f"{base}?domain={urllib.parse.quote(domain)}"
+                   f"&location=India&start={start}&num={PCSX_PAGE}")
             d = _fetch_list("GET", url).json()
             if not isinstance(d, dict):
-                return None
-            return ((d.get("data") or {}).get("positions")) or []
+                return None, None
+            data = d.get("data") or {}
+            return (data.get("positions") or []), data.get("count")
         except Exception:
-            return None
+            return None, None
 
-    tasks = [(q, pg * PCSX_PAGE) for q in PCSX_QUERIES for pg in range(PCSX_MAX_PAGES)]
-    failed = 0
-    with cf.ThreadPoolExecutor(max_workers=8) as ex:
-        for positions in ex.map(lambda t: page(*t), tasks):
-            if positions is None:
-                failed += 1
+    start, pages, failed, count, rows = 0, 0, 0, None, 0
+    while pages < PCSX_MAX_PAGES:
+        positions, total = page(start)
+        pages += 1
+        if positions is None:                 # request failed — a hole, not an end
+            failed += 1
+            break
+        if total is not None:
+            count = total
+        if not positions:                     # the board says there is no more
+            break
+        for j in positions:
+            jid = str(j.get("id", ""))
+            if not jid or jid in seen:
                 continue
-            for j in positions:
-                jid = str(j.get("id", ""))
-                if not jid or jid in seen:
-                    continue
-                locs = j.get("locations") or j.get("standardizedLocations") or []
-                url = j.get("positionUrl") or ""
-                if url.startswith("/"):
-                    url = f"https://{host}{url}"
-                seen[jid] = {
-                    "id": jid,
-                    "company": company,
-                    "title": j.get("name", ""),
-                    "location": "; ".join(locs) if isinstance(locs, list) else str(locs),
-                    "url": url,
-                    "department": j.get("department", "") or "",
-                    "description": "",                    # filled lazily
-                    "_detail": f"https://{host}/api/apply/v2/jobs/{jid}?domain={domain}",
-                    "source": "pcsx",
-                }
-    _check_pages(company, failed, len(tasks), len(seen))
+            locs = j.get("locations") or j.get("standardizedLocations") or []
+            url = j.get("positionUrl") or ""
+            if url.startswith("/"):
+                url = f"https://{host}{url}"
+            seen[jid] = {
+                "id": jid,
+                "company": company,
+                "title": j.get("name", ""),
+                "location": "; ".join(locs) if isinstance(locs, list) else str(locs),
+                "url": url,
+                "department": j.get("department", "") or "",
+                "description": "",                    # filled lazily
+                "_detail": f"https://{host}/api/apply/v2/jobs/{jid}?domain={domain}",
+                "source": "pcsx",
+            }
+        start += len(positions)
+        rows += len(positions)
+
+    _check_pages(company, failed, pages, len(seen))
+    # Three ways this walk can end short of the board, all of which make a
+    # missing role unprovable rather than pulled: a failed page, the runaway
+    # guard, or reading fewer rows than the board says it holds.
+    #
+    # That last test counts ROWS READ, not jobs kept, and the difference is not
+    # academic: Microsoft's board serves 220 rows carrying 28 duplicate ids, so
+    # a complete walk of it yields 192 unique jobs. Comparing the deduped total
+    # against `count` called that board permanently partial — which would have
+    # switched off closure detection there for good, quietly, in the name of a
+    # fix for exactly that kind of silent damage.
+    if failed:
+        pass                                  # _check_pages already marked it
+    elif pages >= PCSX_MAX_PAGES:
+        mark_partial(company, f"page cap {PCSX_MAX_PAGES} hit at {len(seen)} jobs")
+    elif _short_walk(rows, count):
+        mark_partial(company, f"read {rows} of {count} rows listed")
     return list(seen.values())
 
 
@@ -1090,7 +1472,7 @@ def inbox(company: str, token: str) -> list[dict]:
     login-walled, reCAPTCHA-gated or client-rendered, so no unauthenticated
     GET from a GitHub runner can reach them. They were written off as
     impossible in companies.yaml for exactly that reason. `harvest/run.py`
-    now drives Chrome on your Mac instead, drops normalised jobs here as
+    now drives Chrome on a local Mac instead, drops normalised jobs here as
     JSONL, and commits them; this adapter is the seam where they rejoin the
     pipeline, so browser-sourced roles get the same fit gate, tiers, Slack
     and cockpit as every API board — no parallel scoring path to maintain.

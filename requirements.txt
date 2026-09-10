@@ -1,2 +1,4 @@
 requests>=2.31
 PyYAML>=6.0
+dnspython>=2.4        # MX lookup for verify.py
+playwright>=1.40    # renders JS-only careers pages (yc_source); optional at runtime

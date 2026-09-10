@@ -23,8 +23,19 @@ localStorage, so this file only needs to carry the roles + their draft content.
 from __future__ import annotations
 import json
 import re
+import subprocess
 import time
 import pathlib
+
+# Where the bot publishes the tracker. CI polls the boards, writes this file and
+# commits it here with [skip ci]; nothing else writes it.
+PUBLISHED_REF = "origin/main"
+
+# Bump when the JD experience parser changes, to re-gate rows already listed.
+# 2 (2026-08-11): fit.min_years_required learned the "N years IN/BUILDING x"
+# phrasings, which is most of them — under v1 only 3 of 111 rows carried a
+# readable requirement at all.
+REGATE_VERSION = 2
 
 FIELDS = ("title", "company", "location", "url", "score", "resume", "reason",
           "referrers", "alumni", "excoll", "email_pattern", "email_researched",
@@ -38,6 +49,59 @@ def load(path: pathlib.Path) -> dict:
         except json.JSONDecodeError:
             pass
     return {}
+
+
+def load_published(path: pathlib.Path, ref: str = PUBLISHED_REF) -> tuple[dict, str]:
+    """Read the tracker as the bot last published it, not as this branch has it.
+
+    The cockpit is rendered from a file, and that file is written by CI on main.
+    A checkout sitting on any other branch therefore holds a copy frozen at the
+    moment it branched — and a frozen tracker does not render a frozen page, it
+    renders a shrinking one: prune()'s age cutoff is evaluated against today
+    while nothing new ever arrives, so the list can only drain. Seven days on a
+    feature branch took the cockpit from 51 rows to 8 that way, which reads as
+    the filters having broken rather than the file having gone stale.
+
+    So read the blob straight out of git, and say which copy was used. Nothing
+    is written: the branch's own state/ is left exactly as it was, which matters
+    because a local run that mutates shared state has cost a live role's alert
+    before.
+
+    Falls back to the working tree when git can't answer — no network, no such
+    ref, not a repo. The caller reports the source either way; a silent fallback
+    to the stale copy is the failure this function exists to prevent.
+    """
+    root = path.parent.parent
+    rel = f"{path.parent.name}/{path.name}"
+    # Best-effort refresh. Offline is fine — we fall through to whatever the
+    # last fetch left behind, and that is still fresher than a feature branch.
+    try:
+        subprocess.run(["git", "fetch", "--quiet", "origin", ref.split("/")[-1]],
+                       cwd=root, capture_output=True, timeout=20)
+    except (OSError, subprocess.SubprocessError):
+        pass
+    try:
+        out = subprocess.run(["git", "show", f"{ref}:{rel}"], cwd=root,
+                             capture_output=True, text=True, timeout=20)
+        if out.returncode == 0:
+            return json.loads(out.stdout), ref
+    except (OSError, subprocess.SubprocessError, json.JSONDecodeError):
+        pass
+    return load(path), "working tree"
+
+
+def published_age(path: pathlib.Path, ref: str = PUBLISHED_REF) -> str:
+    """How long ago the bot last wrote the tracker, as git recorded it."""
+    try:
+        out = subprocess.run(
+            ["git", "log", "-1", "--format=%cr", ref, "--",
+             f"{path.parent.name}/{path.name}"],
+            cwd=path.parent.parent, capture_output=True, text=True, timeout=20)
+        if out.returncode == 0 and out.stdout.strip():
+            return out.stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        pass
+    return "unknown age"
 
 
 def _entry(job: dict) -> dict:
@@ -80,14 +144,25 @@ def add(tracker: dict, jobs: list[dict], keyfn) -> dict:
         # refresh the draft content but keep the original first_seen so the
         # follow-up clock and ordering don't reset on a repost.
         first = tracker.get(k, {}).get("first_seen", now)
+        # `regated: 0`, not True. A row created here has had its JD scored by
+        # the fit gate, but nothing has yet run the experience PARSER over it —
+        # revalidate() cannot, because `relevant` is built from the tracker as
+        # it stood before this row existed, so a role is never regated on the
+        # run it is added. `True` compares equal to 1, so both gates below
+        # behaved correctly either way; the page did not. `_years_flag` reads
+        # this field as "we looked", and rendered "no yrs stated — we read the
+        # JD and it states no experience requirement" on 23 of 80 rows that
+        # nobody had read. That is the exact confusion the flag exists to end:
+        # a silent JD and an unread one are opposite facts, and only one of
+        # them is safe to act on.
         tracker[k] = {**_entry(j), "first_seen": first,
-                      "verifiable": True, "misses": 0, "regated": True}
+                      "verifiable": True, "misses": 0, "regated": 0}
     return tracker
 
 
 def revalidate(tracker: dict, live_urls: set, live_tks: set, healthy: set,
                relevant: dict, check_years=None, hard_years: int = 0,
-               closed_after: int = 2) -> dict:
+               closed_after: int = 2, partial: set = frozenset()) -> dict:
     """Re-check every tracked role against the boards as they are right now.
 
     Two things rot in a tracker that is only ever appended to. A posting gets
@@ -103,14 +178,45 @@ def revalidate(tracker: dict, live_urls: set, live_tks: set, healthy: set,
         → repoint the Apply link at the live req rather than calling it closed;
       * neither → count a miss, and mark `closed` once it has missed
         `closed_after` runs in a row (one miss can be a partial page);
+      * UNLESS the board is in `partial` — a board we sampled rather than
+        enumerated, where absence is not evidence of anything (below);
       * the company has no board of ours (aggregator rows) → `verifiable: False`,
         left alone. We can't prove those either way, so the cockpit labels them
         instead of pretending.
 
-    `check_years(job) -> int | None` re-reads the JD's experience floor for rows
-    we can see. A row whose floor now clears `hard_years` is marked `unfit`, and
-    the cockpit drops it out of the working views. Only rows not yet re-gated
-    are checked, so the JD refetch is a one-time cost per role, not per run.
+    `check_years(job) -> (low, high) | None` re-reads the JD's experience
+    requirement for rows we can see. A row whose floor now clears `hard_years`
+    is marked `unfit`, and the cockpit drops it out of the working views. Only
+    rows below `REGATE_VERSION` are checked, so the JD refetch is a one-time
+    cost per role, not per run.
+
+    The version, rather than a bare "already done" flag, is the whole point.
+    The flag froze 108 of 111 rows at "states no requirement" — which was the
+    parser failing, not the JDs being silent — and nothing could ever re-ask,
+    because the flag records that we looked, not what we knew when we looked.
+    Bumping REGATE_VERSION re-sweeps the existing page on the next run; without
+    it a parser fix reaches new roles only, which is the slowest possible way
+    to find out whether the fix worked.
+
+    ── `partial`: boards we skimmed may not condemn a role ──
+    Everything above rests on one assumption — that a role missing from
+    `live_urls` is missing from the board. That is only true if the fetch
+    enumerated the board. For the query-and-page adapters it did not: pcsx read
+    99 of Qualcomm's 577 India roles, workday 60 of Citi's 1042. A role outside
+    that window looks exactly like a role that was pulled.
+
+    It is not a hypothetical. An 85-scored Qualcomm "Engineer" alerted on
+    2026-08-18 at 13:10 was flagged "⚠️ Posting gone" seven runs later and
+    dropped out of the To-do and To-apply views, while both its requisitions
+    were still listed on the board. The cockpit is the thing you actually
+    works from, so a live role hidden there is worse than a dead one left on
+    it — a dead link costs one click, a hidden role costs the application.
+
+    So a board that reports itself partial gets no vote: no miss, no `closed`,
+    and no repost-repair either, since the "new requisition" it would repoint
+    at is often just a sibling that happened to fall inside the window. A
+    positive sighting still counts — seeing a role is proof it is there, from a
+    sample as much as from a full sweep — so the counters still reset.
     """
     for k, row in tracker.items():
         co = (row.get("company") or "").lower()
@@ -119,6 +225,12 @@ def revalidate(tracker: dict, live_urls: set, live_tks: set, healthy: set,
             continue
         row["verifiable"] = True
         live = row.get("url") in live_urls
+        if not live and co in partial:
+            # We only skimmed this board. Absence proves nothing, so leave the
+            # row exactly as it was rather than moving it toward `closed`.
+            row["sampled"] = True
+            continue
+        row.pop("sampled", None)
         if not live and k in live_tks:
             # same role, new requisition — repair the link instead of dropping it
             j = relevant.get(k)
@@ -134,15 +246,18 @@ def revalidate(tracker: dict, live_urls: set, live_tks: set, healthy: set,
             if row["misses"] >= closed_after:
                 row["closed"] = True
 
-        if check_years and hard_years and not row.get("regated"):
+        if check_years and hard_years and row.get("regated", 0) < REGATE_VERSION:
             j = relevant.get(k)
             if j is not None:
-                yrs = check_years(j)
-                row["regated"] = True
-                if yrs is not None:
-                    row["min_years"] = yrs
-                    if yrs >= hard_years:
-                        row["unfit"] = f"JD asks for {yrs}+ years"
+                span = check_years(j)
+                row["regated"] = REGATE_VERSION
+                row.pop("min_years", None)
+                row.pop("max_years", None)
+                if span is not None:
+                    lo, hi = span
+                    row["min_years"], row["max_years"] = lo, hi
+                    if lo >= hard_years:
+                        row["unfit"] = f"JD asks for {lo}+ years"
     return tracker
 
 
@@ -184,10 +299,19 @@ def prune(tracker: dict, f: dict) -> tuple[dict, dict]:
     # page for their full retention. That is a fortnight of the filter reading
     # as broken, and it bites hardest exactly when the new pattern is important
     # — the fixed-term rule added 2026-08-09 was there to clear an Amazon FTC
-    # row scored 90, i.e. the first thing he'd have seen for the next 14 days.
+    # row scored 90, i.e. the first thing you'd have seen for the next 14 days.
     # Measured before shipping: the full current list kills 0 of the 110 rows
     # on the page, so this re-gate only ever acts on newly-added patterns.
     dropped_titles = re.compile("|".join(f["title_exclude"]), re.I)
+    # Same argument for the ruled-out level-II bands, with the same JD-first
+    # rule the poller applies (see filters.yaml `level_gate`): a level-II
+    # posting at one of these companies stays if its JD states a low enough
+    # floor. A row we have not re-gated yet is left alone rather than dropped —
+    # we have not read its JD, and the JD is what decides.
+    lg = f.get("level_gate") or {}
+    lg_cos = [c.lower() for c in (lg.get("companies") or [])]
+    lg_title = re.compile(lg.get("title") or r"\b(?:ii|2)\b", re.I)
+    lg_cap = lg.get("max_years", 1)
     kept = {}
     for k, v in tracker.items():
         age = (now - v.get("first_seen", 0)) / 86400
@@ -204,6 +328,12 @@ def prune(tracker: dict, f: dict) -> tuple[dict, dict]:
             dropped["unfit"] += 1
             continue
         if dropped_titles.search(v.get("title") or ""):
+            dropped["unfit"] += 1
+            continue
+        if (lg_cos and (v.get("company") or "").lower() in lg_cos
+                and lg_title.search(v.get("title") or "")
+                and v.get("regated", 0) >= REGATE_VERSION
+                and not (v.get("min_years") is not None and v["min_years"] <= lg_cap)):
             dropped["unfit"] += 1
             continue
         if v.get("closed") and age >= f.get("closed_grace_days", 2):
